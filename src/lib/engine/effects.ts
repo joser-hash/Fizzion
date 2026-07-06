@@ -38,6 +38,10 @@ export class Effects {
   shocks: Shockwave[] = [];
   texts: FloatText[] = [];
 
+  /** Live spark budget + spawn multiplier, driven by the quality governor. */
+  sparkCap = 220;
+  sparkScale = 1;
+
   private shakeAmp = 0;
   private shakeLeft = 0;
   private shakeDur = 1;
@@ -47,7 +51,16 @@ export class Effects {
   flashColor = '#fff';
   flashAlpha = 0;
 
+  /** Oldest sparks make room when the budget is full (spikes stay bounded). */
+  private reserve(count: number): number {
+    const n = Math.max(1, Math.round(count * this.sparkScale));
+    const overflow = this.sparks.length + n - this.sparkCap;
+    if (overflow > 0) this.sparks.splice(0, overflow);
+    return n;
+  }
+
   burst(x: number, y: number, color: string, count: number, speed = 180): void {
+    count = this.reserve(count);
     for (let i = 0; i < count; i++) {
       const a = rand(0, TAU);
       const s = rand(speed * 0.3, speed);
@@ -66,6 +79,7 @@ export class Effects {
 
   /** Directed spray of sparks from (x,y) toward (tx,ty) — the delivery jet. */
   jet(x: number, y: number, tx: number, ty: number, color: string, count: number): void {
+    count = this.reserve(count);
     const base = Math.atan2(ty - y, tx - x);
     const d = Math.hypot(tx - x, ty - y);
     for (let i = 0; i < count; i++) {

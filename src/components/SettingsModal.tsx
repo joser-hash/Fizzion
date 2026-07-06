@@ -58,8 +58,10 @@ function Toggle({ on, onFlip }: { on: boolean; onFlip: () => void }) {
 export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const muted = useGameStore((s) => s.muted);
   const hapticsOn = useGameStore((s) => s.haptics);
+  const musicOn = useGameStore((s) => s.music);
   const toggleMute = useGameStore((s) => s.toggleMute);
   const toggleHaptics = useGameStore((s) => s.toggleHaptics);
+  const toggleMusic = useGameStore((s) => s.toggleMusic);
   const [confirmReset, setConfirmReset] = useState(false);
 
   const reset = () => {
@@ -95,12 +97,16 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
             exit={{ scale: 0.92, y: 16 }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mb-5 text-lg font-black tracking-[0.25em] text-white">SETTINGS</div>
+            <div className="font-display mb-5 text-lg font-black tracking-[0.25em] text-white">SETTINGS</div>
 
             <div className="flex flex-col gap-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-white/80">Sound effects</span>
                 <Toggle on={!muted} onFlip={toggleMute} />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-white/80">Music</span>
+                <Toggle on={musicOn} onFlip={toggleMusic} />
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-white/80">Haptics</span>

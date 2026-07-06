@@ -22,7 +22,7 @@ body,
 
 body {
   font-family:
-    'Chakra Petch',
+    'Oxanium',
     ui-sans-serif,
     system-ui,
     -apple-system,
@@ -43,6 +43,11 @@ body {
 canvas {
   display: block;
   touch-action: none;
+}
+
+/* Display face for big headlines (title, collapse, modal headers). */
+.font-display {
+  font-family: 'Orbitron', 'Oxanium', ui-sans-serif, system-ui, sans-serif;
 }
 
 /* Safe area utilities */

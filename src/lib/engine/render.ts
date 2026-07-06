@@ -22,10 +22,19 @@ export interface Scene {
   heat: number;
   /** False on menu/results: hides run-only chrome (stability bar, vignette). */
   playing: boolean;
+  /** Quality tier from the governor (0 = full ... 2 = low). */
+  quality: number;
   time: number;
   /** Live drag vector while the player is aiming, or null. */
   drag: { x: number; y: number; dx: number; dy: number } | null;
 }
+
+/** Ring glow passes, widest first (lower quality tiers skip from the front). */
+const RING_PASSES: readonly (readonly [number, number])[] = [
+  [3.2, 0.12],
+  [1.8, 0.3],
+  [1, 1],
+];
 
 /**
  * All drawing is procedural. Glow uses pre-rendered radial-gradient
@@ -35,6 +44,8 @@ export interface Scene {
 export class Renderer {
   private sprites = new Map<string, HTMLCanvasElement>();
   private vignetteSprite: HTMLCanvasElement | null = null;
+  /** Current quality tier, latched from the Scene each frame. */
+  private q = 0;
 
   // Stability bar animation state.
   private dispStability = 1;
@@ -73,8 +84,11 @@ export class Renderer {
     alpha = 1,
   ): void {
     const spr = this.sprite(color);
-    ctx.globalAlpha = 0.32 * alpha;
-    ctx.drawImage(spr, x - r * 3, y - r * 3, r * 6, r * 6);
+    // The wide halo is the most fill-rate-hungry layer: reduced tiers drop it.
+    if (this.q < 1) {
+      ctx.globalAlpha = 0.32 * alpha;
+      ctx.drawImage(spr, x - r * 3, y - r * 3, r * 6, r * 6);
+    }
     ctx.globalAlpha = 0.55 * alpha;
     ctx.drawImage(spr, x - r * 1.7, y - r * 1.7, r * 3.4, r * 3.4);
     ctx.globalAlpha = alpha;
@@ -96,11 +110,10 @@ export class Renderer {
     from = 0,
     to = TAU,
   ): void {
-    for (const [wMul, aMul] of [
-      [3.2, 0.12],
-      [1.8, 0.3],
-      [1, 1],
-    ] as const) {
+    if (r <= 0.1) return; // negative radii throw (decay wobble can dip below 0)
+    // Widest glow passes go first, so lower tiers can just skip them.
+    for (let i = this.q; i < RING_PASSES.length; i++) {
+      const [wMul, aMul] = RING_PASSES[i];
       ctx.globalAlpha = alpha * aMul;
       ctx.strokeStyle = color;
       ctx.lineWidth = baseWidth * wMul;
@@ -113,6 +126,7 @@ export class Renderer {
   }
 
   render(ctx: CanvasRenderingContext2D, s: Scene, w: number, h: number): void {
+    this.q = s.quality;
     const dt = clamp(s.time - this.lastTime, 0, 0.1);
     this.lastTime = s.time;
     this.updateStabilityAnim(s.stability, dt);
@@ -155,11 +169,14 @@ export class Renderer {
     const r = orbRadius(orb);
     const spr = this.sprite(orb.color);
     const glow = 0.3 * (1 + heat * 0.8); // combo heat brightens the trail
-    for (let i = 0; i < n; i++) {
+    const stride = this.q + 1; // thin the trail on lower tiers
+    for (let i = n - 1; i >= 0; i -= stride) {
       const t = i / n;
+      const alpha = Math.min(1, t * t * glow);
+      if (alpha < 0.02) break; // older points only get fainter
       const p = orb.trail[i];
       const size = r * (0.25 + 0.65 * t);
-      ctx.globalAlpha = Math.min(1, t * t * glow);
+      ctx.globalAlpha = alpha;
       ctx.drawImage(spr, p.x - size, p.y - size, size * 2, size * 2);
     }
     ctx.globalAlpha = 1;
@@ -305,7 +322,12 @@ export class Renderer {
     const critical = stab < CONFIG.stabilityWarnAt;
     const wobble =
       Math.sin(s.time * 11) * decay * 2.5 + (critical ? (Math.random() - 0.5) * 2.4 : 0);
-    const r = CONFIG.portalRadius * scale * (1 + 0.03 * Math.sin(s.time * 1.8)) + wobble;
+    // Clamp: while the ring is fully collapsed mid-reroll, the decay wobble
+    // could otherwise push the radius negative and throw in arc().
+    const r = Math.max(
+      0.5,
+      CONFIG.portalRadius * scale * (1 + 0.03 * Math.sin(s.time * 1.8)) + wobble,
+    );
 
     let alpha = 0.55 + 0.45 * stab;
     if (critical) alpha *= 0.65 + 0.35 * Math.random(); // sputter
@@ -337,7 +359,7 @@ export class Renderer {
     if (label && scale > 0.85) {
       ctx.globalAlpha = alpha * (0.75 + 0.25 * Math.sin(s.time * 3));
       ctx.fillStyle = p.color;
-      ctx.font = `800 20px 'Chakra Petch', ui-sans-serif, system-ui, sans-serif`;
+      ctx.font = `800 20px 'Oxanium', ui-sans-serif, system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(label, p.x, p.y);
@@ -348,14 +370,14 @@ export class Renderer {
     if (p.requestType === 'pure' && scale > 0.85) {
       ctx.globalAlpha = alpha * 0.85;
       ctx.fillStyle = p.color;
-      ctx.font = `800 11px 'Chakra Petch', ui-sans-serif, system-ui, sans-serif`;
+      ctx.font = `800 11px 'Oxanium', ui-sans-serif, system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.fillText('P U R E', p.x, p.y + r + 24);
       ctx.globalAlpha = 1;
     }
 
     // Orbiting sparkles (more of them while the combo runs hot).
-    const sparkles = 5 + Math.round(s.heat * 3);
+    const sparkles = this.q === 0 ? 5 + Math.round(s.heat * 3) : this.q === 1 ? 3 : 2;
     for (let i = 0; i < sparkles; i++) {
       const a = p.rotation * 1.6 + (i * TAU) / sparkles;
       const sx = p.x + Math.cos(a) * (r + 18);
@@ -547,15 +569,17 @@ export class Renderer {
   private drawEffects(ctx: CanvasRenderingContext2D, fx: Effects): void {
     for (const sp of fx.sparks) {
       const a = clamp(sp.life / sp.maxLife, 0, 1);
+      if (a < 0.02) continue;
       this.glow(ctx, sp.x, sp.y, sp.size, sp.color, a);
     }
     for (const w of fx.shocks) {
       const a = clamp(w.life / w.maxLife, 0, 1);
+      if (a < 0.02) continue;
       this.ring(ctx, w.x, w.y, w.r, w.color, w.width * a, a);
     }
     for (const t of fx.texts) {
       const a = clamp(t.life / t.maxLife, 0, 1);
-      ctx.font = `700 ${t.size}px 'Chakra Petch', ui-sans-serif, system-ui, sans-serif`;
+      ctx.font = `700 ${t.size}px 'Oxanium', ui-sans-serif, system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.globalAlpha = a * 0.4;
       ctx.fillStyle = t.color;

@@ -9,7 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@fontsource/chakra-petch": "^5.2.7",
+    "@fontsource/orbitron": "^5.2.8",
+    "@fontsource/oxanium": "^5.2.8",
     "framer-motion": "^12.42.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

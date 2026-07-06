@@ -12,10 +12,15 @@ function Score() {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let raf = 0;
+    let last = -1;
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      if (ref.current) {
-        ref.current.textContent = String(Math.round(engine.hud.displayScore));
+      const value = Math.round(engine.hud.displayScore);
+      // Skip the DOM write when nothing changed: this node has a text
+      // shadow, so every write forces a repaint.
+      if (ref.current && value !== last) {
+        last = value;
+        ref.current.textContent = String(value);
       }
     };
     raf = requestAnimationFrame(tick);

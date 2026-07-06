@@ -108,7 +108,7 @@ export function ResultsScreen() {
       </div>
       <div className="flex flex-1 flex-col items-center justify-center gap-5 px-6">
         <motion.div {...item(0)} className="flex flex-col items-center gap-1">
-          <div className="text-lg font-bold tracking-[0.3em] text-[#ff2975] [text-shadow:0_0_16px_rgba(255,41,117,0.5)]">
+          <div className="font-display text-lg font-bold tracking-[0.3em] text-[#ff2975] [text-shadow:0_0_16px_rgba(255,41,117,0.5)]">
             PORTAL COLLAPSED
           </div>
           <div className="text-xs tracking-[0.3em] text-white/40">

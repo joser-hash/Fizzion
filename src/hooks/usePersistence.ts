@@ -17,6 +17,7 @@ export function usePersistence(debounceMs = 400): void {
         s.roundsPlayed === prev.roundsPlayed &&
         s.muted === prev.muted &&
         s.haptics === prev.haptics &&
+        s.music === prev.music &&
         s.upgrades === prev.upgrades &&
         s.adsRemoved === prev.adsRemoved &&
         s.ftueDone === prev.ftueDone &&
@@ -34,6 +35,7 @@ export function usePersistence(debounceMs = 400): void {
           roundsPlayed: cur.roundsPlayed,
           muted: cur.muted,
           haptics: cur.haptics,
+          music: cur.music,
           upgrades: cur.upgrades,
           adsRemoved: cur.adsRemoved,
           ftueDone: cur.ftueDone,

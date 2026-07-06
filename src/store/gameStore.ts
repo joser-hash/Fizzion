@@ -14,6 +14,8 @@ export interface PersistedData {
   muted: boolean;
   /** Vibration feedback on supported devices. */
   haptics: boolean;
+  /** Background music on/off. */
+  music: boolean;
   /** Owned permanent upgrade levels by upgrade id (added in save v2). */
   upgrades: Record<string, number>;
   /** Remove Ads purchased (added in save v3). */
@@ -34,6 +36,7 @@ const DEFAULT_PERSISTED: PersistedData = {
   roundsPlayed: 0,
   muted: false,
   haptics: true,
+  music: true,
   upgrades: {},
   adsRemoved: false,
   ftueDone: false,
@@ -97,7 +100,7 @@ interface GameStore extends PersistedData {
 
   colorLockCharges: number;
   lastRound: LastRound | null;
-  /** Stats held while the Second Wind (revive) offer is on screen. */
+  /** Stats held while the Second Chance (revive) offer is on screen. */
   pendingStats: RoundStats | null;
   sessionBest: number;
   /** Incremented whenever the chain breaks; HUD uses it to shatter the text. */
@@ -115,7 +118,7 @@ interface GameStore extends PersistedData {
   syncFromEngine(snap: HudSnapshot): void;
   beginRound(): void;
   finishRound(stats: RoundStats): void;
-  /** Portal collapsed with a revive available: show the Second Wind offer. */
+  /** Portal collapsed with a revive available: show the Second Chance offer. */
   offerRevive(stats: RoundStats): void;
   /**
    * Revive accepted (ad watched); caller resumes the engine. Declines go
@@ -127,6 +130,7 @@ interface GameStore extends PersistedData {
   useColorLockCharge(): void;
   toggleMute(): void;
   toggleHaptics(): void;
+  toggleMusic(): void;
   recordAd(completed: boolean): void;
   markInterstitialShown(): void;
   addSparks(n: number): void;
@@ -237,6 +241,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   toggleMute: () => set((s) => ({ muted: !s.muted })),
   toggleHaptics: () => set((s) => ({ haptics: !s.haptics })),
+  toggleMusic: () => set((s) => ({ music: !s.music })),
 
   recordAd: (completed) =>
     set((s) =>

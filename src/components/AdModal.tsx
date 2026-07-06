@@ -7,7 +7,7 @@ const PLACEMENT_LABELS: Record<string, string> = {
   stabilize: 'Stabilize',
   color_lock: 'Color Lock',
   double_down: 'Double Down',
-  second_wind: 'Second Wind',
+  second_wind: 'Second Chance',
 };
 
 /** Full-screen mock ad: 3s countdown, then a close (or skip) control. */

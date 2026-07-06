@@ -83,6 +83,22 @@ export const CONFIG = {
   /** Below this fraction the bar blinks and the warn heartbeat plays. */
   stabilityWarnAt: 0.3,
 
+  // --- Performance / quality governor ---
+  /** Render resolution multiplier per quality tier (0 = full ... 2 = low). */
+  qualityRenderScale: [1, 0.75, 0.6],
+  /** Live spark budget per tier (oldest evicted beyond it). */
+  qualitySparkCap: [220, 140, 80],
+  /** Burst/jet spawn count multiplier per tier. */
+  qualitySparkScale: [1, 0.7, 0.5],
+  /** Step a tier down when avg fps sits below this... */
+  qualityStepDownFps: 48,
+  /** ...for this many seconds. */
+  qualityStepDownAfter: 2,
+  /** Step a tier back up when avg fps sits above this... */
+  qualityStepUpFps: 57,
+  /** ...for this many seconds (long, so it never oscillates). */
+  qualityStepUpAfter: 10,
+
   // --- Difficulty ramp ---
   /** Seconds of run time until the difficulty ramp is fully applied. */
   rampDuration: 180,
@@ -228,7 +244,7 @@ export const CONFIG = {
   /** Color Lock freeze duration (s). */
   colorLockDuration: 5,
 
-  // --- Revive (Second Wind) ---
+  // --- Revive (Second Chance) ---
   /** Stability restored when a rewarded revive is accepted. */
   reviveStability: 0.5,
   /** Seconds the revive offer stays on screen before auto-declining. */

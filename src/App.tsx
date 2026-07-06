@@ -1,4 +1,6 @@
+import { useEffect } from 'react';
 import { AnimatePresence } from 'framer-motion';
+import { startMusic, stopMusic } from './audio/useGameMusic';
 import { GameCanvas } from './components/GameCanvas';
 import { HUD } from './components/HUD';
 import { FtueCoach, RequestCoach } from './components/FtueCoach';
@@ -14,6 +16,16 @@ import { useGameStore } from './store/gameStore';
 export default function App() {
   usePersistence();
   const phase = useGameStore((s) => s.phase);
+  const musicOn = useGameStore((s) => s.music);
+
+  // Ambience starts with the title screen (respecting the persisted music
+  // setting) and follows the settings toggle from then on. If autoplay is
+  // blocked, the player module waits for the first tap and starts then
+  // (idempotent, so StrictMode's double mount is harmless).
+  useEffect(() => {
+    if (musicOn) void startMusic();
+    else stopMusic();
+  }, [musicOn]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-black">

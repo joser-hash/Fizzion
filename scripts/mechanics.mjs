@@ -623,7 +623,7 @@ check(
   `${variety.rushDuration} vs ${variety.expectedRush}`,
 );
 
-// --- Stability zero offers Second Wind (revive) first ---
+// --- Stability zero offers Second Chance (revive) first ---
 const collapse = await page.evaluate(async () => {
   const { engine, useGameStore } = window.__fizzion;
   engine.portal.lockLeft = 0;
@@ -639,7 +639,7 @@ const collapse = await page.evaluate(async () => {
   };
 });
 check(
-  'stability zero offers Second Wind (revive phase, stats pending)',
+  'stability zero offers Second Chance (revive phase, stats pending)',
   collapse.phase === 'revive' && collapse.stability === 0 && collapse.hasPending,
   JSON.stringify(collapse),
 );

@@ -1,8 +1,10 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import '@fontsource/chakra-petch/400.css';
-import '@fontsource/chakra-petch/600.css';
-import '@fontsource/chakra-petch/700.css';
+import '@fontsource/oxanium/400.css';
+import '@fontsource/oxanium/600.css';
+import '@fontsource/oxanium/700.css';
+import '@fontsource/orbitron/700.css';
+import '@fontsource/orbitron/900.css';
 import './index.css';
 import App from './App.tsx';
 
@@ -24,12 +26,14 @@ if (import.meta.env.DEV) {
     import('./store/gameStore'),
     import('./lib/constants'),
     import('./lib/upgrades'),
-  ]).then(([{ engine }, { useGameStore }, { CONFIG }, { upgradeEffects }]) => {
+    import('./audio/useGameMusic'),
+  ]).then(([{ engine }, { useGameStore }, { CONFIG }, { upgradeEffects }, music]) => {
     (window as unknown as Record<string, unknown>).__fizzion = {
       engine,
       useGameStore,
       CONFIG,
       upgradeEffects,
+      music,
     };
   });
 }

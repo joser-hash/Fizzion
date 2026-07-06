@@ -64,7 +64,7 @@ export function ShopModal({ open, onClose }: { open: boolean; onClose: () => voi
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-4 flex items-center justify-between">
-              <div className="text-lg font-black tracking-[0.25em] text-white">SHOP</div>
+              <div className="font-display text-lg font-black tracking-[0.25em] text-white">SHOP</div>
               <div className="flex items-center gap-1 text-sm font-semibold text-[#ffd500] [text-shadow:0_0_10px_rgba(255,213,0,0.4)]">
                 <SparkIcon size={15} /> {sparks}
               </div>

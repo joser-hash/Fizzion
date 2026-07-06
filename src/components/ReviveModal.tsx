@@ -6,7 +6,7 @@ import { useAdService } from '../hooks/useAdService';
 import { useGameStore } from '../store/gameStore';
 
 /**
- * Second Wind offer: shown once per run when stability hits zero. Watching
+ * Second Chance offer: shown once per run when stability hits zero. Watching
  * a rewarded ad restores the portal and resumes the run; declining (or
  * letting the countdown lapse) ends the run for real.
  */
@@ -58,7 +58,7 @@ export function ReviveModal() {
     >
       <div className="flex flex-col items-center gap-2">
         <motion.div
-          className="text-xl font-black tracking-[0.3em] text-[#ff2975] [text-shadow:0_0_18px_rgba(255,41,117,0.6)]"
+          className="font-display text-xl font-black tracking-[0.3em] text-[#ff2975] [text-shadow:0_0_18px_rgba(255,41,117,0.6)]"
           animate={{ opacity: [0.6, 1, 0.6] }}
           transition={{ duration: 0.9, repeat: Infinity }}
         >
@@ -97,7 +97,7 @@ export function ReviveModal() {
           onClick={accept}
           disabled={watching}
         >
-          &#9654; SECOND WIND
+          &#9654; SECOND CHANCE
         </motion.button>
         <div className="text-xs uppercase tracking-wider text-white/40">
           Watch an ad — portal restored to 50%

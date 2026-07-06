@@ -42,21 +42,31 @@ check(
 );
 const flagsBefore = await page.evaluate(() => {
   const s = window.__fizzion.useGameStore.getState();
-  return { muted: s.muted, haptics: s.haptics };
+  return { muted: s.muted, music: s.music, haptics: s.haptics };
 });
 await page.getByRole('switch').first().click(); // sound
-await page.getByRole('switch').nth(1).click(); // haptics
+await page.getByRole('switch').nth(1).click(); // music
+await page.getByRole('switch').nth(2).click(); // haptics
 const flagsAfter = await page.evaluate(() => {
   const s = window.__fizzion.useGameStore.getState();
-  return { muted: s.muted, haptics: s.haptics };
+  return { muted: s.muted, music: s.music, haptics: s.haptics };
 });
 check(
-  'SFX + haptics toggles flip store state',
-  flagsAfter.muted === !flagsBefore.muted && flagsAfter.haptics === !flagsBefore.haptics,
+  'SFX + music + haptics toggles flip store state',
+  flagsAfter.muted === !flagsBefore.muted &&
+    flagsAfter.music === !flagsBefore.music &&
+    flagsAfter.haptics === !flagsBefore.haptics,
   JSON.stringify(flagsAfter),
 );
+// Music off must silence the player (it may still be mid-fade here).
+await page.waitForTimeout(500);
+check(
+  'music toggle off stops the player',
+  await page.evaluate(() => !window.__fizzion.music.getMusicState().playing),
+);
 await page.getByRole('switch').first().click(); // restore sound
-await page.getByRole('switch').nth(1).click(); // restore haptics
+await page.getByRole('switch').nth(1).click(); // restore music
+await page.getByRole('switch').nth(2).click(); // restore haptics
 await page.getByText('CLOSE').click();
 await page.waitForTimeout(300);
 check(
@@ -79,6 +89,40 @@ await page.mouse.click(195, 420);
 await page.waitForTimeout(300);
 const phase1 = await page.evaluate(() => window.__fizzion.useGameStore.getState().phase);
 check('round starts after tap', phase1 === 'playing', `phase=${phase1}`);
+
+// Background music: the start gesture kicks off the intro+loop source.
+await page
+  .waitForFunction(() => window.__fizzion.music.getMusicState().hasSource, null, {
+    timeout: 10000,
+  })
+  .catch(() => {});
+const music = await page.evaluate(() => window.__fizzion.music.getMusicState());
+check(
+  'music playing after the start gesture',
+  music.playing && music.hasSource && music.contextState === 'running',
+  JSON.stringify(music),
+);
+check(
+  'music loops the main section only (intro excluded)',
+  music.loopStart !== null && Math.abs(music.loopStart - 23.417) < 0.01 &&
+    music.loopEnd > music.loopStart,
+  `loopStart=${music.loopStart?.toFixed(3)} loopEnd=${music.loopEnd?.toFixed(1)}`,
+);
+const musicStopStart = await page.evaluate(async () => {
+  const { music: m } = window.__fizzion;
+  m.stopMusic();
+  await new Promise((r) => setTimeout(r, 500)); // fade-out + teardown
+  const stopped = m.getMusicState();
+  await m.startMusic(); // buffer is cached: resolves quickly
+  const restarted = m.getMusicState();
+  return { stopped, restarted };
+});
+check(
+  'music stop fades out and releases the source; restart replays cleanly',
+  !musicStopStart.stopped.playing && !musicStopStart.stopped.hasSource &&
+    musicStopStart.restarted.playing && musicStopStart.restarted.hasSource,
+  JSON.stringify(musicStopStart),
+);
 
 check(
   'FTUE coach steer step visible in first round',
@@ -135,17 +179,17 @@ check(
   `paused=${tPause1.toFixed(2)} resumed=${tResume.toFixed(2)}`,
 );
 
-// Wait for the portal to collapse (stability hits 0) -> Second Wind offer.
+// Wait for the portal to collapse (stability hits 0) -> Second Chance offer.
 await page.waitForFunction(
   () => window.__fizzion.useGameStore.getState().phase === 'revive',
   null,
   { timeout: 15000 },
 );
-check('Second Wind offer on death', await page.getByText('SECOND WIND').isVisible());
+check('Second Chance offer on death', await page.getByText('SECOND CHANCE').isVisible());
 
 // Accept: watch the rewarded ad, claim, and the run resumes.
 // (force: the button has an infinite pulse animation, never "stable")
-await page.getByText('SECOND WIND').click({ force: true });
+await page.getByText('SECOND CHANCE').click({ force: true });
 check('revive rewarded ad opens', await page.getByText('AD (mock)').isVisible());
 await page.waitForTimeout(3300);
 await page.getByText('CLAIM REWARD').click();

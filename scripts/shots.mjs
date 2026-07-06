@@ -77,7 +77,7 @@ await page.evaluate(() => {
   window.__fizzion.engine.hazards.length = 0;
 });
 
-// Collapse the portal -> Second Wind offer.
+// Collapse the portal -> Second Chance offer.
 await page.evaluate(() => {
   window.__fizzion.engine.score = 1240;
   window.__fizzion.engine.portal.requestType = 'normal';

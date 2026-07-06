@@ -97,6 +97,7 @@ class Engine {
     comboHeat: 0,
     instability: 0,
     colorLockLeft: 0,
+    fps: 60,
   };
 
   private canvas: HTMLCanvasElement | null = null;
@@ -144,12 +145,24 @@ class Engine {
   private syncAcc = 0;
   private spawnAcc = 0;
 
+  // Quality governor: 0 = full, 1 = reduced, 2 = low.
+  quality = 0;
+  /** Set by a manual override (debug panel): the governor stands down. */
+  qualityLocked = false;
+  private fpsEma = 60;
+  private lowFpsAcc = 0;
+  private highFpsAcc = 0;
+
   // ---- lifecycle -------------------------------------------------------
 
   init(canvas: HTMLCanvasElement, cb: EngineCallbacks): void {
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d');
+    // Opaque canvas: we paint a full black background every frame anyway,
+    // and opaque surfaces composite cheaper (desynchronized cuts latency
+    // where supported).
+    this.ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
     this.cb = cb;
+    this.loadQuality();
     this.input.attach(
       canvas,
       (dx, dy) => {
@@ -174,7 +187,9 @@ class Engine {
   resize(): void {
     const c = this.canvas;
     if (!c) return;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr =
+      Math.min(window.devicePixelRatio || 1, 2) *
+      (CONFIG.qualityRenderScale[this.quality] ?? 1);
     this.w = window.innerWidth;
     this.h = window.innerHeight;
     c.width = Math.round(this.w * dpr);
@@ -183,6 +198,62 @@ class Engine {
     c.style.height = `${this.h}px`;
     this.ctx?.setTransform(dpr, 0, 0, dpr, 0, 0);
     layoutPortal(this.portal, this.w, this.h);
+  }
+
+  // ---- quality governor ------------------------------------------------
+
+  private loadQuality(): void {
+    const raw = Number(localStorage.getItem('fizzion_quality'));
+    if (raw === 1 || raw === 2) this.quality = raw;
+    this.applyQuality();
+  }
+
+  /** Set a tier (governor or manual override) and apply all its knobs. */
+  setQuality(tier: number, locked = this.qualityLocked): void {
+    this.quality = Math.max(0, Math.min(CONFIG.qualityRenderScale.length - 1, tier));
+    this.qualityLocked = locked;
+    this.lowFpsAcc = 0;
+    this.highFpsAcc = 0;
+    localStorage.setItem('fizzion_quality', String(this.quality));
+    this.applyQuality();
+    this.resize();
+  }
+
+  private applyQuality(): void {
+    this.effects.sparkCap = CONFIG.qualitySparkCap[this.quality] ?? 220;
+    this.effects.sparkScale = CONFIG.qualitySparkScale[this.quality] ?? 1;
+  }
+
+  /**
+   * Frame-time EMA + hysteresis: shed load fast when the device struggles,
+   * climb back slowly and only during real play so it never oscillates.
+   */
+  private updateGovernor(rawMs: number): void {
+    if (rawMs <= 0 || rawMs > 250) return; // tab switch / resume outlier
+    this.fpsEma += (1000 / rawMs - this.fpsEma) * 0.05;
+    this.hud.fps = this.fpsEma;
+    if (this.qualityLocked || this.paused || this.phase !== 'playing') return;
+
+    const dt = rawMs / 1000;
+    if (this.fpsEma < CONFIG.qualityStepDownFps) {
+      this.lowFpsAcc += dt;
+      this.highFpsAcc = 0;
+      if (
+        this.lowFpsAcc >= CONFIG.qualityStepDownAfter &&
+        this.quality < CONFIG.qualityRenderScale.length - 1
+      ) {
+        this.setQuality(this.quality + 1);
+      }
+    } else if (this.fpsEma > CONFIG.qualityStepUpFps) {
+      this.highFpsAcc += dt;
+      this.lowFpsAcc = 0;
+      if (this.highFpsAcc >= CONFIG.qualityStepUpAfter && this.quality > 0) {
+        this.setQuality(this.quality - 1);
+      }
+    } else {
+      this.lowFpsAcc = 0;
+      this.highFpsAcc = 0;
+    }
   }
 
   // ---- commands (UI -> engine) ----------------------------------------
@@ -258,6 +329,7 @@ class Engine {
     this.raf = requestAnimationFrame(this.frame);
     const rawMs = now - this.lastFrame;
     this.lastFrame = now;
+    this.updateGovernor(rawMs);
     let dt = clamp(rawMs, 0, CONFIG.maxDeltaMs) / 1000;
     this.time += dt;
 
@@ -297,6 +369,7 @@ class Engine {
           stability: this.stability,
           heat: Math.min(1, this.comboHeat / CONFIG.comboHeatFull),
           playing: this.phase === 'playing',
+          quality: this.quality,
           time: this.time,
           drag: this.phase === 'playing' && !this.paused ? this.input.drag : null,
         },
@@ -661,7 +734,7 @@ class Engine {
     rerollPortal(this.portal, this.difficulty);
   }
 
-  /** Rewarded "Second Wind": resume the collapsed run once per run. */
+  /** Rewarded "Second Chance": resume the collapsed run once per run. */
   revive(): void {
     if (this.phase !== 'ended' || this.reviveUsed) return;
     this.reviveUsed = true;
@@ -704,7 +777,7 @@ class Engine {
   private endRound(): void {
     this.phase = 'ended';
     this.sync(true);
-    // Death is the revive moment: offer Second Wind once per run.
+    // Death is the revive moment: offer Second Chance once per run.
     if (!this.reviveUsed) {
       this.cb?.onCollapse(this.roundStats());
     } else {

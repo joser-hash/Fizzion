@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { CONFIG } from '../lib/constants';
+import { engine } from '../lib/engine/engine';
 
 interface Field {
   key: keyof typeof CONFIG;
@@ -38,6 +39,13 @@ export function DebugPanel() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // Live fps/tier readout while the panel is open.
+  useEffect(() => {
+    if (!open) return;
+    const id = setInterval(() => forceRender((n) => n + 1), 500);
+    return () => clearInterval(id);
+  }, [open]);
+
   const onCornerTap = () => {
     const now = performance.now();
     taps.current = [...taps.current.filter((t) => now - t < 700), now];
@@ -58,6 +66,33 @@ export function DebugPanel() {
           <div className="mb-2 flex justify-between">
             <span className="font-bold">DEBUG</span>
             <button onClick={() => setOpen(false)}>[x]</button>
+          </div>
+          <div className="mb-2 flex items-center justify-between">
+            <span>{Math.round(engine.hud.fps)} fps</span>
+            <span className="flex items-center gap-1">
+              quality
+              {[0, 1, 2].map((tier) => (
+                <button
+                  key={tier}
+                  className={`px-1 ${
+                    engine.quality === tier && engine.qualityLocked
+                      ? 'bg-white/30 text-white'
+                      : engine.quality === tier
+                        ? 'bg-white/10 text-white'
+                        : 'text-white/50'
+                  }`}
+                  onClick={() => engine.setQuality(tier, true)}
+                >
+                  {tier}
+                </button>
+              ))}
+              <button
+                className={`px-1 ${engine.qualityLocked ? 'text-white/50' : 'bg-white/10 text-white'}`}
+                onClick={() => engine.setQuality(engine.quality, false)}
+              >
+                auto
+              </button>
+            </span>
           </div>
           {FIELDS.map((f) => (
             <label key={f.key} className="mb-2 block">
