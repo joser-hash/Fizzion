@@ -43,6 +43,8 @@ const RING_PASSES: readonly (readonly [number, number])[] = [
  */
 export class Renderer {
   private sprites = new Map<string, HTMLCanvasElement>();
+  /** Baked halo/core sprites for dot-like glows (see haloSprite/coreSprite). */
+  private dotSprites = new Map<string, HTMLCanvasElement>();
   private vignetteSprite: HTMLCanvasElement | null = null;
   /** Current quality tier, latched from the Scene each frame. */
   private q = 0;
@@ -74,7 +76,60 @@ export class Renderer {
     return s;
   }
 
-  /** Layered glow: big soft halo -> mid halo -> bright core. */
+  /**
+   * Both glow halos baked into one sprite per color. Baked additively
+   * ('lighter'), and the summed center alpha (0.32 + 0.55) never clamps,
+   * so one draw of this sprite is mathematically identical to the two
+   * separate halo draws it replaces. Sprite radius = 3x the core radius.
+   */
+  private haloSprite(color: string, full: boolean): HTMLCanvasElement {
+    const key = `${color}|${full ? 'hi' : 'lo'}`;
+    let s = this.dotSprites.get(key);
+    if (!s) {
+      const size = 192;
+      const core = size / 6; // core radius r within the sprite
+      s = document.createElement('canvas');
+      s.width = size;
+      s.height = size;
+      const c = s.getContext('2d')!;
+      c.globalCompositeOperation = 'lighter';
+      const spr = this.sprite(color);
+      const cx = size / 2;
+      // The wide halo is the most fill-rate-hungry layer: low tiers skip it.
+      if (full) {
+        c.globalAlpha = 0.32;
+        c.drawImage(spr, cx - core * 3, cx - core * 3, core * 6, core * 6);
+      }
+      c.globalAlpha = 0.55;
+      c.drawImage(spr, cx - core * 1.7, cx - core * 1.7, core * 3.4, core * 3.4);
+      this.dotSprites.set(key, s);
+    }
+    return s;
+  }
+
+  /** Solid antialiased disc, replacing a per-call arc()+fill path raster. */
+  private coreSprite(color: string): HTMLCanvasElement {
+    const key = `${color}|core`;
+    let s = this.dotSprites.get(key);
+    if (!s) {
+      const size = 64;
+      s = document.createElement('canvas');
+      s.width = size;
+      s.height = size;
+      const c = s.getContext('2d')!;
+      c.fillStyle = color;
+      c.beginPath();
+      c.arc(size / 2, size / 2, size / 2, 0, TAU);
+      c.fill();
+      this.dotSprites.set(key, s);
+    }
+    return s;
+  }
+
+  /**
+   * Layered glow (soft halos + bright core) in two pre-baked drawImages —
+   * the hot path for particles, sparks, pips and sparkles.
+   */
   private glow(
     ctx: CanvasRenderingContext2D,
     x: number,
@@ -83,19 +138,9 @@ export class Renderer {
     color: string,
     alpha = 1,
   ): void {
-    const spr = this.sprite(color);
-    // The wide halo is the most fill-rate-hungry layer: reduced tiers drop it.
-    if (this.q < 1) {
-      ctx.globalAlpha = 0.32 * alpha;
-      ctx.drawImage(spr, x - r * 3, y - r * 3, r * 6, r * 6);
-    }
-    ctx.globalAlpha = 0.55 * alpha;
-    ctx.drawImage(spr, x - r * 1.7, y - r * 1.7, r * 3.4, r * 3.4);
     ctx.globalAlpha = alpha;
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, TAU);
-    ctx.fill();
+    ctx.drawImage(this.haloSprite(color, this.q < 1), x - r * 3, y - r * 3, r * 6, r * 6);
+    ctx.drawImage(this.coreSprite(color), x - r, y - r, r * 2, r * 2);
     ctx.globalAlpha = 1;
   }
 
@@ -276,7 +321,7 @@ export class Renderer {
       const g = c.getContext('2d')!;
       // Transparent well past mid-screen; full red only out by the corners.
       const grad = g.createRadialGradient(
-        size / 2, size / 2, size * 0.38,
+        size / 2, size / 2, size * 0.33,
         size / 2, size / 2, size * 0.6,
       );
       grad.addColorStop(0, '#ff297500');
@@ -286,8 +331,8 @@ export class Renderer {
       this.vignetteSprite = c;
     }
     const depth = 1 - s.stability / CONFIG.stabilityWarnAt; // 0 at threshold -> 1 at zero
-    const pulse = 0.5 + 0.5 * Math.sin(s.time * (3 + depth * 4));
-    ctx.globalAlpha = (0.08 + depth * 0.16) * (0.55 + 0.45 * pulse);
+    const pulse = 0.5 + 0.5 * Math.sin(s.time * (3 + depth * 6));
+    ctx.globalAlpha = (0.14 + depth * 0.3) * (0.55 + 0.45 * pulse);
     ctx.drawImage(this.vignetteSprite, -w * 0.12, -h * 0.12, w * 1.24, h * 1.24);
     ctx.globalAlpha = 1;
   }
