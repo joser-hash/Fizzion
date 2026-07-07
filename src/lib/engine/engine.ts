@@ -756,10 +756,36 @@ class Engine {
       this.effects.text(this.w / 2, this.h * 0.42, 'NEW COLOR!', unlocked, 20);
       this.effects.flash(unlocked, 0.08);
       this.effects.shockwave(this.w / 2, this.h / 2, unlocked, Math.min(this.w, this.h) * 0.4, 3);
+      // The unlock shockwave "converts" a handful of existing drops so the
+      // new color is instantly collectible — the field is full at this
+      // moment, so a fresh cluster would have no room to spawn.
+      const idle = this.particles.filter(
+        (q) => q.state === 'idle' && q.expireLife === undefined,
+      );
+      for (let i = 0; i < 5 && idle.length > 0; i++) {
+        const drop = idle.splice(Math.floor(Math.random() * idle.length), 1)[0];
+        drop.color = unlocked;
+        this.effects.burst(drop.x, drop.y, unlocked, 3, 120);
+      }
     }
 
-    rerollPortal(p, this.difficulty, this.activeColors);
+    rerollPortal(p, this.difficulty, this.requestableColors());
     this.sync(true);
+  }
+
+  /**
+   * Active colors that actually have food on the field, so the portal never
+   * requests a color the player can't collect. Falls back to the full
+   * active palette if the field is starved (e.g. everything mid-attract).
+   */
+  private requestableColors(): readonly GameColor[] {
+    const counts = new Map<GameColor, number>();
+    for (const q of this.particles) {
+      if (q.state !== 'idle' || q.expireLife !== undefined) continue;
+      counts.set(q.color, (counts.get(q.color) ?? 0) + 1);
+    }
+    const present = this.activeColors.filter((c) => (counts.get(c) ?? 0) >= 3);
+    return present.length > 0 ? present : this.activeColors;
   }
 
   private handlePortalExpiry(): void {
@@ -785,7 +811,7 @@ class Engine {
       this.cb?.onChainBreak();
     }
     this.sync(true);
-    rerollPortal(this.portal, this.difficulty, this.activeColors);
+    rerollPortal(this.portal, this.difficulty, this.requestableColors());
   }
 
   /** Rewarded "Second Chance": resume the collapsed run once per run. */
@@ -801,7 +827,7 @@ class Engine {
     this.hazardCooldown = CONFIG.hazardCooldownMin; // post-revive breathing room
     this.deliveriesSinceRelocate = 0;
     pickRelocationSpot(this.portal, this.w, this.h, this.orb.x, this.orb.y);
-    rerollPortal(this.portal, this.difficulty, this.activeColors);
+    rerollPortal(this.portal, this.difficulty, this.requestableColors());
     this.effects.flash('#00ff88', 0.12);
     this.effects.shockwave(this.portal.x, this.portal.y, '#00ff88', CONFIG.portalRadius * 3, 5);
     audio.chime(1);

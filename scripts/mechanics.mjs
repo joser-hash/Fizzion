@@ -984,6 +984,51 @@ const rampPersist = await page.evaluate(
 );
 check('colorRampDone persists across reload', rampPersist === true, `done=${rampPersist}`);
 
+// --- Unlock seeds the new color; portal only requests collectible colors ---
+const seed = await page.evaluate(async () => {
+  const { engine, useGameStore, GAME_COLORS } = window.__fizzion;
+  useGameStore.setState({ colorRampDone: false });
+  useGameStore.getState().beginRound();
+  engine.startRound({ colorRamp: true });
+  await new Promise((r) => setTimeout(r, 200));
+
+  // One delivery away from the 3rd-color unlock; deliver for real so the
+  // unlock path (recolor + reroll) runs.
+  engine.deliveries = 1;
+  engine.orb.x = 195;
+  engine.orb.y = 700;
+  await new Promise((r) => setTimeout(r, 300)); // contact reset
+  const c = GAME_COLORS[0];
+  engine.orb.pips = [c];
+  engine.orb.color = c;
+  engine.portal.color = c;
+  engine.portal.minMass = 0;
+  engine.orb.x = engine.portal.x;
+  engine.orb.y = engine.portal.y;
+  await new Promise((r) => setTimeout(r, 400)); // hit-stop + celebration
+
+  const third = GAME_COLORS[2];
+  const countOf = (color) =>
+    engine.particles.filter(
+      (p) => p.color === color && p.state === 'idle' && p.expireLife === undefined,
+    ).length;
+  return {
+    deliveries: engine.deliveries,
+    thirdOnField: countOf(third),
+    requestedOnField: countOf(engine.portal.nextColor),
+  };
+});
+check(
+  'color unlock recolors drops so the new color is on the field',
+  seed.deliveries === 2 && seed.thirdOnField >= 3,
+  JSON.stringify(seed),
+);
+check(
+  'portal request color has collectible food on the field',
+  seed.requestedOnField >= 3,
+  JSON.stringify(seed),
+);
+
 check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 
 await browser.close();
