@@ -27,11 +27,12 @@ if (import.meta.env.DEV) {
     import('./lib/constants'),
     import('./lib/upgrades'),
     import('./audio/useGameMusic'),
-  ]).then(([{ engine }, { useGameStore }, { CONFIG }, { upgradeEffects }, music]) => {
+  ]).then(([{ engine }, { useGameStore }, { CONFIG, GAME_COLORS }, { upgradeEffects }, music]) => {
     (window as unknown as Record<string, unknown>).__fizzion = {
       engine,
       useGameStore,
       CONFIG,
+      GAME_COLORS,
       upgradeEffects,
       music,
     };

@@ -18,6 +18,11 @@ page.on('pageerror', (e) => errors.push(String(e)));
 
 await page.goto('http://localhost:5173/');
 await page.waitForFunction(() => window.__fizzion, null, { timeout: 10000 });
+// The FTUE color ramp is tested explicitly at the end; everything before
+// assumes the full 4-color game, so mark it complete up front.
+await page.evaluate(() => {
+  window.__fizzion.useGameStore.setState({ colorRampDone: true });
+});
 await page.mouse.click(195, 420); // start round
 await page.waitForTimeout(300);
 
@@ -755,8 +760,8 @@ const persisted = await page.evaluate(() => {
   };
 });
 check(
-  'purchase survives reload with v3 save',
-  persisted.version === 3 &&
+  'purchase survives reload with v4 save',
+  persisted.version === 4 &&
     persisted.level === 1 &&
     Math.abs(persisted.mult - 0.88) < 1e-9 &&
     persisted.sparks === 800,
@@ -900,6 +905,84 @@ check(
   'min-mass toast appears on first N+ sighting',
   await page.getByText('This portal wants a bigger orb').isVisible(),
 );
+
+// --- FTUE color ramp: colors unlock with deliveries, grace before the 1st ---
+const ramp = await page.evaluate(async () => {
+  const { engine, CONFIG, useGameStore, GAME_COLORS } = window.__fizzion;
+  useGameStore.setState({ colorRampDone: false });
+  CONFIG.maxParticles = 40; // restore ambient food to inspect spawn colors
+  useGameStore.getState().beginRound();
+  engine.startRound({ colorRamp: true });
+  await new Promise((r) => setTimeout(r, 200));
+
+  const pair = GAME_COLORS.slice(0, 2);
+  const start = {
+    activeCount: engine.activeColors.length,
+    portalInPair: pair.includes(engine.portal.color),
+    allParticlesInPair: engine.particles.every((p) => pair.includes(p.color)),
+    particleCount: engine.particles.length,
+  };
+
+  // Expiry before the first delivery: reroll (within the pair), but no drain.
+  engine.portal.timeLeft = 0.01;
+  await new Promise((r) => setTimeout(r, 150));
+  const grace = {
+    stability: engine.stability,
+    nextColorInPair: pair.includes(engine.portal.nextColor),
+  };
+
+  // First delivery: still 2 colors (3rd unlocks at 2 deliveries).
+  await new Promise((r) => setTimeout(r, 600)); // reroll anim + contact reset
+  engine.orb.x = 195;
+  engine.orb.y = 700;
+  await new Promise((r) => setTimeout(r, 200));
+  engine.orb.pips = [pair[0]];
+  engine.orb.color = pair[0];
+  engine.portal.color = pair[0];
+  engine.portal.minMass = 0;
+  engine.orb.x = engine.portal.x;
+  engine.orb.y = engine.portal.y;
+  await new Promise((r) => setTimeout(r, 400)); // hit-stop + celebration
+  const afterFirst = engine.activeColors.length;
+
+  // Later thresholds: jump the delivery counter directly.
+  engine.deliveries = 2;
+  const afterSecond = engine.activeColors.length;
+  engine.deliveries = 4;
+  const afterFourth = engine.activeColors.length;
+  await new Promise((r) => setTimeout(r, 300)); // store sync marks completion
+  const rampDone = useGameStore.getState().colorRampDone;
+
+  return { start, grace, afterFirst, afterSecond, afterFourth, rampDone };
+});
+check(
+  'ramp start: 2 active colors, portal + all particles within the pair',
+  ramp.start.activeCount === 2 &&
+    ramp.start.portalInPair &&
+    ramp.start.allParticlesInPair &&
+    ramp.start.particleCount > 0,
+  JSON.stringify(ramp.start),
+);
+check(
+  'pre-first-delivery expiry: no stability drain, reroll stays in the pair',
+  ramp.grace.stability === 1 && ramp.grace.nextColorInPair,
+  JSON.stringify(ramp.grace),
+);
+check(
+  'colors unlock at 2/4 deliveries (2 -> 3 -> 4 active)',
+  ramp.afterFirst === 2 && ramp.afterSecond === 3 && ramp.afterFourth === 4,
+  `after1=${ramp.afterFirst} after2=${ramp.afterSecond} after4=${ramp.afterFourth}`,
+);
+check('colorRampDone set once all colors unlocked', ramp.rampDone === true);
+
+// Completion persists: after reload, runs start with the full palette.
+await page.waitForTimeout(1200); // debounced save
+await page.reload();
+await page.waitForFunction(() => window.__fizzion, null, { timeout: 10000 });
+const rampPersist = await page.evaluate(
+  () => window.__fizzion.useGameStore.getState().colorRampDone,
+);
+check('colorRampDone persists across reload', rampPersist === true, `done=${rampPersist}`);
 
 check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 

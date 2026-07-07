@@ -13,7 +13,7 @@ Open the printed URL on a phone (or a phone-sized browser window) in portrait.
 
 ## How to play
 
-First run includes a light FTUE: coach lines advance as you steer, eat, and deliver, and the first results screen points you at Sparks and the shop (shown once, persisted).
+First run includes a light FTUE: coach lines advance as you steer, eat, and deliver, and the first results screen points you at Sparks and the shop (shown once, persisted). Learner runs also ramp the palette gradually — you start with two colors (enough to see pips and matching work, and the portal can't hurt you until your first delivery), then the 3rd and 4th colors unlock at 2/4 deliveries with a "NEW COLOR!" burst. The ramp stays active across runs until completed once, then never returns.
 
 - Swipe/drag to impulse the orb (drag direction = force direction).
 - Eating a particle adds mass and a colored pip (the orb carries its last 3).

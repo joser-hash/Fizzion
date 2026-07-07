@@ -114,9 +114,15 @@ function rampFrac(difficulty: number, start: number): number {
   return clamp((difficulty - start) / (1 - start), 0, 1);
 }
 
-export function rerollPortal(portal: Portal, difficulty: number): void {
-  const others = GAME_COLORS.filter((c) => c !== portal.color);
-  portal.nextColor = pick(others);
+export function rerollPortal(
+  portal: Portal,
+  difficulty: number,
+  colors: readonly GameColor[] = GAME_COLORS,
+): void {
+  const others = colors.filter((c) => c !== portal.color);
+  // Single-color FTUE stage: the reroll animation still plays (fresh timer),
+  // but the color can't change.
+  portal.nextColor = others.length > 0 ? pick(others) : portal.color;
   portal.rerollLeft = CONFIG.portalRerollMs;
 
   // Request type: weights grow with difficulty; all-normal early on.

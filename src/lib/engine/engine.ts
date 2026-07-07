@@ -1,4 +1,4 @@
-import { CONFIG, type GameColor } from '../constants';
+import { CONFIG, GAME_COLORS, type GameColor } from '../constants';
 import { haptics } from '../haptics';
 import { upgradeEffects } from '../upgrades';
 import { clamp, dist, lerp } from './utils';
@@ -123,6 +123,8 @@ class Engine {
   private sparksEarned = 0;
   private deliveries = 0;
   private deliveriesSinceRelocate = 0;
+  /** FTUE color ramp: colors unlock with deliveries until completed once. */
+  private colorRampActive = false;
   private overloads = 0;
   private runTime = 0;
   private stability = 1;
@@ -258,7 +260,8 @@ class Engine {
 
   // ---- commands (UI -> engine) ----------------------------------------
 
-  startRound(): void {
+  startRound(opts?: { colorRamp?: boolean }): void {
+    this.colorRampActive = opts?.colorRamp ?? false;
     this.orb = createOrb(this.w / 2, this.h / 2);
     this.particles = [];
     this.hazards = [];
@@ -266,6 +269,12 @@ class Engine {
     this.effects.clear();
     this.portal = createPortal();
     layoutPortal(this.portal, this.w, this.h);
+    // Learner stage 1: the portal's first request comes from the reduced
+    // starting palette (createPortal picks from all four).
+    if (this.colorRampActive) {
+      const ac = this.activeColors;
+      this.portal.color = ac[Math.floor(Math.random() * ac.length)];
+    }
     this.score = 0;
     this.chain = 0;
     this.chainTimeLeft = 0;
@@ -284,7 +293,15 @@ class Engine {
     this.hitStopLeft = 0;
     this.paused = false;
     while (foodCount(this.particles) < CONFIG.maxParticles - CONFIG.clusterMax) {
-      spawnCluster(this.particles, this.w, this.h, this.portal.x, this.portal.y, this.orb);
+      spawnCluster(
+        this.particles,
+        this.w,
+        this.h,
+        this.portal.x,
+        this.portal.y,
+        this.orb,
+        this.activeColors,
+      );
     }
     this.phase = 'playing';
     this.sync(true);
@@ -321,6 +338,17 @@ class Engine {
   /** Difficulty ramp 0..1 over the configured ramp duration. */
   get difficulty(): number {
     return clamp(this.runTime / CONFIG.rampDuration, 0, 1);
+  }
+
+  /**
+   * Colors currently in play. Outside the FTUE ramp this is the full
+   * palette; on learner runs colors unlock one by one as deliveries land.
+   */
+  get activeColors(): readonly GameColor[] {
+    if (!this.colorRampActive) return GAME_COLORS;
+    let n = CONFIG.colorRampStartColors;
+    for (const t of CONFIG.colorRampUnlocks) if (this.deliveries >= t) n++;
+    return GAME_COLORS.slice(0, n);
   }
 
   // ---- loop ------------------------------------------------------------
@@ -453,7 +481,15 @@ class Engine {
     if (this.spawnAcc > 0.4) {
       this.spawnAcc = 0;
       if (foodCount(this.particles) <= CONFIG.maxParticles - CONFIG.clusterMin) {
-        spawnCluster(this.particles, this.w, this.h, this.portal.x, this.portal.y, this.orb);
+        spawnCluster(
+          this.particles,
+          this.w,
+          this.h,
+          this.portal.x,
+          this.portal.y,
+          this.orb,
+          this.activeColors,
+        );
       }
     }
 
@@ -709,19 +745,37 @@ class Engine {
       pickRelocationSpot(p, this.w, this.h, fresh.x, fresh.y);
     }
 
-    rerollPortal(p, this.difficulty);
+    // FTUE ramp: a delivery milestone brings a new color into play — make
+    // the moment felt so the palette change reads as a reward, not a bug.
+    if (
+      this.colorRampActive &&
+      (CONFIG.colorRampUnlocks as readonly number[]).includes(this.deliveries)
+    ) {
+      const colors = this.activeColors;
+      const unlocked = colors[colors.length - 1];
+      this.effects.text(this.w / 2, this.h * 0.42, 'NEW COLOR!', unlocked, 20);
+      this.effects.flash(unlocked, 0.08);
+      this.effects.shockwave(this.w / 2, this.h / 2, unlocked, Math.min(this.w, this.h) * 0.4, 3);
+    }
+
+    rerollPortal(p, this.difficulty, this.activeColors);
     this.sync(true);
   }
 
   private handlePortalExpiry(): void {
     // Missed request: the portal destabilizes (softened by Reinforced Portal).
-    this.stability = Math.max(
-      0,
-      this.stability - CONFIG.stabilityDrainExpire * upgradeEffects.expireDrainMult,
-    );
-    this.effects.flash('#ff2975', 0.07);
-    audio.thud();
-    haptics.tap();
+    // Learner grace: until the very first delivery of an FTUE-ramp run, the
+    // portal isn't dangerous yet — reroll without draining stability.
+    const grace = this.colorRampActive && this.deliveries === 0;
+    if (!grace) {
+      this.stability = Math.max(
+        0,
+        this.stability - CONFIG.stabilityDrainExpire * upgradeEffects.expireDrainMult,
+      );
+      this.effects.flash('#ff2975', 0.07);
+      audio.thud();
+      haptics.tap();
+    }
 
     // Wasted match: expiring while the orb currently matches breaks the chain.
     const wasted = this.orb.pips.length > 0 && this.orb.color === this.portal.color;
@@ -731,7 +785,7 @@ class Engine {
       this.cb?.onChainBreak();
     }
     this.sync(true);
-    rerollPortal(this.portal, this.difficulty);
+    rerollPortal(this.portal, this.difficulty, this.activeColors);
   }
 
   /** Rewarded "Second Chance": resume the collapsed run once per run. */
@@ -747,7 +801,7 @@ class Engine {
     this.hazardCooldown = CONFIG.hazardCooldownMin; // post-revive breathing room
     this.deliveriesSinceRelocate = 0;
     pickRelocationSpot(this.portal, this.w, this.h, this.orb.x, this.orb.y);
-    rerollPortal(this.portal, this.difficulty);
+    rerollPortal(this.portal, this.difficulty, this.activeColors);
     this.effects.flash('#00ff88', 0.12);
     this.effects.shockwave(this.portal.x, this.portal.y, '#00ff88', CONFIG.portalRadius * 3, 5);
     audio.chime(1);

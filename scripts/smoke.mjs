@@ -76,11 +76,14 @@ check(
 
 // Make the run die quickly: fast-expiring portals with brutal drain.
 await page.evaluate(() => {
-  const { CONFIG } = window.__fizzion;
+  const { CONFIG, useGameStore } = window.__fizzion;
   CONFIG.portalTime = 2;
   CONFIG.portalTimeMin = 2;
   CONFIG.stabilityDrainExpire = 0.5;
   CONFIG.stabilityRestoreDelivery = 0;
+  // Skip the FTUE color ramp: this suite relies on expiry drain from the
+  // first request on (the ramp's learner grace would block it).
+  useGameStore.setState({ colorRampDone: true });
 });
 
 // Tap to start.

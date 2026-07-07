@@ -55,9 +55,10 @@ export function spawnCluster(
   portalX: number,
   portalY: number,
   orb: Orb,
+  colors: readonly GameColor[] = GAME_COLORS,
 ): void {
   const margin = 24;
-  const color = pick(GAME_COLORS);
+  const color = pick(colors);
   let cx = 0;
   let cy = 0;
   for (let attempt = 0; attempt < 24; attempt++) {

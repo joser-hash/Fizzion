@@ -77,9 +77,12 @@ await page.evaluate(() => {
   window.__fizzion.engine.hazards.length = 0;
 });
 
-// Collapse the portal -> Second Chance offer.
+// Collapse the portal -> Second Chance offer. The fresh profile has the FTUE
+// color ramp active, whose learner grace blocks expiry drain at 0 deliveries —
+// credit one so the forced expiry actually collapses the run.
 await page.evaluate(() => {
   window.__fizzion.engine.score = 1240;
+  window.__fizzion.engine.deliveries = 1;
   window.__fizzion.engine.portal.requestType = 'normal';
   window.__fizzion.engine.stability = 0.01;
   window.__fizzion.engine.portal.timeLeft = 0.05;

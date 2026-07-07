@@ -12,7 +12,7 @@ export function startRound(): void {
   // music is already running or disabled in settings).
   if (useGameStore.getState().music) void startMusic();
   useGameStore.getState().beginRound();
-  engine.startRound();
+  engine.startRound({ colorRamp: !useGameStore.getState().colorRampDone });
 }
 
 export function StartScreen() {

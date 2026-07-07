@@ -150,6 +150,13 @@ export const CONFIG = {
   clusterMax: 6,
   clusterRadius: 70,
   particleRadius: 5,
+
+  // --- FTUE color ramp ---
+  /** Learner runs start with 2 colors (so pips/matching are demonstrable);
+   *  these delivery counts unlock the 3rd and 4th. Active until completed
+   *  once (persisted as colorRampDone). */
+  colorRampStartColors: 2,
+  colorRampUnlocks: [2, 4],
   /** Attract animation duration on collection (ms). */
   collectAttractMs: 150,
   /** Distance at which a particle starts getting sucked in (multiple of orb radius). */

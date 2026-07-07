@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { HudSnapshot, RoundStats } from '../lib/engine/engine';
 import type { RequestType } from '../lib/engine/portal';
-import { IAP_CATALOG, UPGRADE_CATALOG } from '../lib/constants';
+import { CONFIG, IAP_CATALOG, UPGRADE_CATALOG } from '../lib/constants';
 import { applyUpgradeLevels } from '../lib/upgrades';
 
 export type GamePhase = 'menu' | 'playing' | 'revive' | 'results';
@@ -24,10 +24,12 @@ export interface PersistedData {
   ftueDone: boolean;
   /** Portal request labels already explained once ("N+", rush, pure). */
   requestsTaught: { minMass?: boolean; rush?: boolean; pure?: boolean };
+  /** FTUE color ramp completed: runs start with the full palette (save v4). */
+  colorRampDone: boolean;
 }
 
 const SAVE_KEY = 'fizzion_save';
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
 
 const DEFAULT_PERSISTED: PersistedData = {
   sparks: 0,
@@ -41,6 +43,7 @@ const DEFAULT_PERSISTED: PersistedData = {
   adsRemoved: false,
   ftueDone: false,
   requestsTaught: {},
+  colorRampDone: false,
 };
 
 export function loadPersisted(): PersistedData {
@@ -49,16 +52,21 @@ export function loadPersisted(): PersistedData {
     if (!raw) return { ...DEFAULT_PERSISTED };
     const parsed = JSON.parse(raw) as { version?: number; data?: Partial<PersistedData> };
     if (typeof parsed.data !== 'object' || !parsed.data) return { ...DEFAULT_PERSISTED };
-    // Schema versioning: v1 lacks `upgrades`, v2 lacks `adsRemoved`; both
-    // merge cleanly over defaults. Unknown/future versions fall back to
-    // defaults entirely.
-    if (parsed.version === 1 || parsed.version === 2 || parsed.version === SAVE_VERSION) {
-      return {
+    // Schema versioning: v1 lacks `upgrades`, v2 lacks `adsRemoved`, v3
+    // lacks `colorRampDone`; all merge cleanly over defaults. Unknown/future
+    // versions fall back to defaults entirely.
+    if (parsed.version !== undefined && parsed.version >= 1 && parsed.version <= SAVE_VERSION) {
+      const data = {
         ...DEFAULT_PERSISTED,
         ...parsed.data,
         upgrades: { ...(parsed.data.upgrades ?? {}) },
         requestsTaught: { ...(parsed.data.requestsTaught ?? {}) },
       };
+      // Migration: players who already learned the game skip the FTUE ramp.
+      if (parsed.version < 4 && (data.roundsPlayed > 0 || data.ftueDone)) {
+        data.colorRampDone = true;
+      }
+      return data;
     }
     return { ...DEFAULT_PERSISTED };
   } catch {
@@ -176,7 +184,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
   rewardedThisRun: false,
 
   syncFromEngine: (snap) =>
-    set({
+    set((s) => ({
+      // Ramp completion is judged here (not at round end) so it sticks even
+      // if the run collapses or the tab closes right after the last unlock.
+      colorRampDone:
+        s.colorRampDone ||
+        snap.deliveries >= CONFIG.colorRampUnlocks[CONFIG.colorRampUnlocks.length - 1],
       chain: snap.chain,
       chainTimeLeft: snap.chainTimeLeft,
       runTime: snap.runTime,
@@ -188,7 +201,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       deliveries: snap.deliveries,
       requestType: snap.requestType,
       requestMinMass: snap.requestMinMass,
-    }),
+    })),
 
   beginRound: () =>
     set((s) => ({

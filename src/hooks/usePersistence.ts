@@ -21,7 +21,8 @@ export function usePersistence(debounceMs = 400): void {
         s.upgrades === prev.upgrades &&
         s.adsRemoved === prev.adsRemoved &&
         s.ftueDone === prev.ftueDone &&
-        s.requestsTaught === prev.requestsTaught
+        s.requestsTaught === prev.requestsTaught &&
+        s.colorRampDone === prev.colorRampDone
       ) {
         return;
       }
@@ -40,6 +41,7 @@ export function usePersistence(debounceMs = 400): void {
           adsRemoved: cur.adsRemoved,
           ftueDone: cur.ftueDone,
           requestsTaught: cur.requestsTaught,
+          colorRampDone: cur.colorRampDone,
         });
       }, debounceMs);
     });
