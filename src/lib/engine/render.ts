@@ -27,6 +27,8 @@ export interface Scene {
   time: number;
   /** Live drag vector while the player is aiming, or null. */
   drag: { x: number; y: number; dx: number; dy: number } | null;
+  /** Learner run before the first delivery: draw self-teaching guides. */
+  ftueGuide: boolean;
 }
 
 /** Ring glow passes, widest first (lower quality tiers skip from the front). */
@@ -186,6 +188,7 @@ export class Renderer {
 
     this.drawTrail(ctx, s.orb, s.heat);
     this.drawParticles(ctx, s);
+    if (s.ftueGuide && s.playing) this.drawFtueGuide(ctx, s);
     this.drawPortal(ctx, s);
     for (const hz of s.hazards) this.drawHazard(ctx, hz, s.time);
     this.drawDrag(ctx, s);
@@ -334,6 +337,38 @@ export class Renderer {
     const pulse = 0.5 + 0.5 * Math.sin(s.time * (3 + depth * 6));
     ctx.globalAlpha = (0.14 + depth * 0.3) * (0.55 + 0.45 * pulse);
     ctx.drawImage(this.vignetteSprite, -w * 0.12, -h * 0.12, w * 1.24, h * 1.24);
+    ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Learner-run guide (pre-first-delivery): once the orb matches the
+   * request, marching dots lead from the orb to the portal — "you're
+   * ready, go there" with zero reading required.
+   */
+  private drawFtueGuide(ctx: CanvasRenderingContext2D, s: Scene): void {
+    const { orb, portal } = s;
+    if (orb.pips.length === 0 || orb.color !== portal.color || portal.rerollLeft > 0) return;
+    const dx = portal.x - orb.x;
+    const dy = portal.y - orb.y;
+    const dist = Math.hypot(dx, dy);
+    const start = orbRadius(orb) + 24;
+    const end = dist - CONFIG.portalRadius - 20;
+    if (end <= start) return;
+    const nx = dx / dist;
+    const ny = dy / dist;
+    const spacing = 26;
+    const march = (s.time * 40) % spacing; // dots flow toward the portal
+    const pulse = 0.5 + 0.2 * Math.sin(s.time * 3);
+    for (let d = start + march; d < end; d += spacing) {
+      // Fade in from the orb side so the trail doesn't crowd the player.
+      const t = (d - start) / (end - start);
+      ctx.globalAlpha = pulse * (0.35 + 0.65 * t);
+      const size = 2.2 + t * 1.2;
+      ctx.fillStyle = portal.color;
+      ctx.beginPath();
+      ctx.arc(orb.x + nx * d, orb.y + ny * d, size, 0, TAU);
+      ctx.fill();
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -576,6 +611,12 @@ export class Renderer {
       const px = x + Math.cos(a) * (hr + pipR + 6);
       const py = y + Math.sin(a) * (hr + pipR + 6);
       this.glow(ctx, px, py, pipR, orb.pips[i]);
+    }
+    // Learner run: a soft breathing ring around the pip orbit anchors the
+    // coach's "these dots are your catches" line to the thing it describes.
+    if (s.ftueGuide && orb.pips.length > 0) {
+      const breathe = 0.25 + 0.2 * Math.sin(s.time * 2.2);
+      this.ring(ctx, x, y, hr + pipR * 2 + 8, '#ffffff', 1.2, breathe);
     }
 
     // Instability meter: thin arc around the orb itself.

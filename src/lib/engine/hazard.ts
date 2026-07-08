@@ -120,8 +120,9 @@ export function updateHazard(hz: Hazard, dt: number, orb: Orb, w: number, h: num
     const dist = Math.hypot(orb.x - hz.x, orb.y - hz.y);
     if (dist < hitDist) {
       if (orb.pips.length > 0) {
-        orb.pips.pop(); // newest catch
-        orb.mass = Math.max(1, orb.mass - 1);
+        // Steal the newest pip but leave mass alone: the orb stays just as
+        // heavy and overload-prone, so a bite never relieves instability.
+        orb.pips.pop();
         orb.color = majorityColor(orb.pips, orb.color);
         orb.stolenFlash = 1;
         result.stole = true;

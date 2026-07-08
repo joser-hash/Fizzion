@@ -62,6 +62,8 @@ export interface HudSnapshot {
   pips: number;
   /** Successful deliveries this run (FTUE coach watches this). */
   deliveries: number;
+  /** Overloads this run (FTUE coach explains the first pop reactively). */
+  overloads: number;
   /** Current portal request (request coach teaches each label once). */
   requestType: RequestType;
   requestMinMass: number;
@@ -400,6 +402,7 @@ class Engine {
           quality: this.quality,
           time: this.time,
           drag: this.phase === 'playing' && !this.paused ? this.input.drag : null,
+          ftueGuide: this.colorRampActive && this.deliveries === 0,
         },
         this.w,
         this.h,
@@ -459,6 +462,12 @@ class Engine {
     const consumed = updateParticles(this.particles, dt, this.orb, this.w, this.h);
     for (const p of consumed) this.consume(p);
 
+    // Learner freeze: on FTUE-ramp runs the first request doesn't tick until
+    // the player has caught a few drops — calm space to learn the controls
+    // without a shrinking timer shouting pressure.
+    if (this.colorRampActive && this.deliveries === 0 && this.orb.mass < 4) {
+      this.portal.timeLeft = this.portal.duration;
+    }
     const expired = updatePortal(this.portal, dt);
     if (this.portal.justRelocated) {
       this.portal.justRelocated = false;
@@ -886,6 +895,7 @@ class Engine {
       colorLockLeft: this.portal.lockLeft,
       pips: this.orb.pips.length,
       deliveries: this.deliveries,
+      overloads: this.overloads,
       requestType: this.portal.requestType,
       requestMinMass: this.portal.minMass,
     });

@@ -102,6 +102,8 @@ interface GameStore extends PersistedData {
   colorLockLeft: number;
   pips: number;
   deliveries: number;
+  /** Overloads this run (FTUE coach reacts to the first pop). */
+  overloads: number;
   /** Current portal request, mirrored for the request coach. */
   requestType: RequestType;
   requestMinMass: number;
@@ -169,6 +171,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   colorLockLeft: 0,
   pips: 0,
   deliveries: 0,
+  overloads: 0,
   requestType: 'normal',
   requestMinMass: 0,
   colorLockCharges: 0,
@@ -199,6 +202,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       colorLockLeft: snap.colorLockLeft,
       pips: snap.pips,
       deliveries: snap.deliveries,
+      overloads: snap.overloads,
       requestType: snap.requestType,
       requestMinMass: snap.requestMinMass,
     })),

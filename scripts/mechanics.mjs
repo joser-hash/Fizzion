@@ -416,10 +416,10 @@ const steal = await page.evaluate(async () => {
   };
 });
 check(
-  'hazard steals the newest pip (mass -1, majority recomputed, thief flees)',
+  'hazard steals the newest pip (mass kept, majority recomputed, thief flees)',
   JSON.stringify(steal.pips) === JSON.stringify(['#00ff88', '#00ff88']) &&
     steal.color === '#00ff88' &&
-    steal.mass === 4 &&
+    steal.mass === 5 &&
     steal.hazardState === 'fleeing' &&
     steal.kicked,
   JSON.stringify(steal),
@@ -570,6 +570,11 @@ check(
   Math.abs(overload.stabilityDrop - overload.expectedDrop) < 0.01 && overload.heatHalved,
   `drop=${overload.stabilityDrop.toFixed(2)} expected=${overload.expectedDrop}`,
 );
+const overloadsSignal = await page.evaluate(async () => {
+  await new Promise((r) => setTimeout(r, 250)); // 10Hz sync tick
+  return window.__fizzion.useGameStore.getState().overloads;
+});
+check('HUD snapshot exposes overloads', overloadsSignal >= 1, `overloads=${overloadsSignal}`);
 
 // --- Stabilize command ---
 const stabilize = await page.evaluate(() => {
@@ -923,13 +928,26 @@ const ramp = await page.evaluate(async () => {
     particleCount: engine.particles.length,
   };
 
-  // Expiry before the first delivery: reroll (within the pair), but no drain.
+  // Learner freeze: before ~3 catches the request timer is pinned at full,
+  // so a forced low timeLeft snaps back instead of expiring.
+  engine.portal.timeLeft = 0.01;
+  await new Promise((r) => setTimeout(r, 150));
+  const freeze = {
+    timeLeft: engine.portal.timeLeft,
+    duration: engine.portal.duration,
+    stability: engine.stability,
+  };
+
+  // Expiry before the first delivery (freeze lifted via mass): reroll
+  // (within the pair), but no stability drain.
+  engine.orb.mass = 5;
   engine.portal.timeLeft = 0.01;
   await new Promise((r) => setTimeout(r, 150));
   const grace = {
     stability: engine.stability,
     nextColorInPair: pair.includes(engine.portal.nextColor),
   };
+  engine.orb.mass = 1; // back to a fresh-orb state for the delivery below
 
   // First delivery: still 2 colors (3rd unlocks at 2 deliveries).
   await new Promise((r) => setTimeout(r, 600)); // reroll anim + contact reset
@@ -953,8 +971,13 @@ const ramp = await page.evaluate(async () => {
   await new Promise((r) => setTimeout(r, 300)); // store sync marks completion
   const rampDone = useGameStore.getState().colorRampDone;
 
-  return { start, grace, afterFirst, afterSecond, afterFourth, rampDone };
+  return { start, freeze, grace, afterFirst, afterSecond, afterFourth, rampDone };
 });
+check(
+  'learner freeze pins the first request timer until a few catches',
+  ramp.freeze.timeLeft > ramp.freeze.duration - 1 && ramp.freeze.stability === 1,
+  JSON.stringify(ramp.freeze),
+);
 check(
   'ramp start: 2 active colors, portal + all particles within the pair',
   ramp.start.activeCount === 2 &&

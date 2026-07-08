@@ -13,13 +13,15 @@ const STEP_TEXT: Record<Exclude<Step, 'done'>, string> = {
 };
 
 const OVERLOAD_TEXT = "Too heavy and you'll overload — deliver before you pop!";
+const OVERLOAD_POP_TEXT = 'You popped! Re-collect the scattered drops before they fade';
 
-/** Every line stays readable at least this long, even if the player is fast. */
-const MIN_DWELL_MS = 2200;
+/** Minimum on-screen time per line, scaled with how long it takes to read. */
+const dwellMs = (text: string): number => Math.max(3500, text.split(' ').length * 300);
 
 // Module scope so progress survives remounts (e.g. across a revive).
 let coachStep: Step = 'steer';
 let overloadTaught = false;
+let overloadPopTaught = false;
 let damageHintSeen = false;
 
 /**
@@ -39,14 +41,17 @@ function CoachInner() {
   const deliveries = useGameStore((s) => s.deliveries);
   const instability = useGameStore((s) => s.instability);
   const stability = useGameStore((s) => s.stability);
+  const overloads = useGameStore((s) => s.overloads);
 
   const [step, setStepState] = useState<Step>(coachStep);
   const [overloadMsg, setOverloadMsg] = useState(false);
+  const [popMsg, setPopMsg] = useState(false);
   const [suppressed, setSuppressed] = useState(false);
   const prevStability = useRef(stability);
   const shownAt = useRef(performance.now());
   const pendingAdvance = useRef<ReturnType<typeof setTimeout> | null>(null);
   const overloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const popTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setStep = (s: Step) => {
     coachStep = s;
@@ -59,7 +64,8 @@ function CoachInner() {
   // minimum dwell so fast players still get to read it.
   const advance = (next: Step) => {
     if (pendingAdvance.current !== null) return;
-    const left = MIN_DWELL_MS - (performance.now() - shownAt.current);
+    const dwell = step !== 'done' ? dwellMs(STEP_TEXT[step]) : 0;
+    const left = dwell - (performance.now() - shownAt.current);
     if (left <= 0) setStep(next);
     else pendingAdvance.current = setTimeout(() => setStep(next), left);
   };
@@ -68,6 +74,7 @@ function CoachInner() {
     () => () => {
       if (pendingAdvance.current) clearTimeout(pendingAdvance.current);
       if (overloadTimer.current) clearTimeout(overloadTimer.current);
+      if (popTimer.current) clearTimeout(popTimer.current);
     },
     [],
   );
@@ -142,6 +149,17 @@ function CoachInner() {
     }
   }, [instability]);
 
+  // The first pop, explained the moment the player is staring at the
+  // scattered drops wondering what happened — the real teachable moment.
+  useEffect(() => {
+    if (!overloadPopTaught && overloads > 0) {
+      overloadPopTaught = true;
+      setOverloadMsg(false);
+      setPopMsg(true);
+      popTimer.current = setTimeout(() => setPopMsg(false), 4500);
+    }
+  }, [overloads]);
+
   // Yield while the HUD's damage hint is on screen (same trigger: first
   // stability drop) so only one teaching line is ever visible.
   useEffect(() => {
@@ -155,18 +173,20 @@ function CoachInner() {
     }
   }, [stability]);
 
-  const text = overloadMsg
-    ? OVERLOAD_TEXT
-    : step !== 'done'
-      ? STEP_TEXT[step]
-      : null;
+  const text = popMsg
+    ? OVERLOAD_POP_TEXT
+    : overloadMsg
+      ? OVERLOAD_TEXT
+      : step !== 'done'
+        ? STEP_TEXT[step]
+        : null;
   const show = !suppressed && text !== null;
 
   return (
     <CoachToast
       text={show ? text : null}
-      toastKey={overloadMsg ? 'overload' : step}
-      urgent={overloadMsg}
+      toastKey={popMsg ? 'pop' : overloadMsg ? 'overload' : step}
+      urgent={popMsg || overloadMsg}
     />
   );
 }
@@ -187,16 +207,20 @@ function CoachToast({
         {text !== null && (
           <motion.div
             key={toastKey}
-            className={`absolute inset-x-8 bottom-36 text-center text-sm tracking-wide ${
-              urgent
-                ? 'text-[#ffd500] [text-shadow:0_0_12px_rgba(255,213,0,0.5)]'
-                : 'text-white/75 [text-shadow:0_0_10px_rgba(255,255,255,0.25)]'
-            }`}
+            className="absolute inset-x-6 bottom-36 flex justify-center"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, transition: { duration: 0.5 } }}
           >
-            {text}
+            <span
+              className={`rounded-full bg-black/45 px-4 py-1.5 text-center text-base tracking-wide backdrop-blur-[2px] ${
+                urgent
+                  ? 'text-[#ffd500] [text-shadow:0_0_12px_rgba(255,213,0,0.5)]'
+                  : 'text-white/90 [text-shadow:0_0_10px_rgba(255,255,255,0.3)]'
+              }`}
+            >
+              {text}
+            </span>
           </motion.div>
         )}
       </AnimatePresence>

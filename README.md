@@ -13,7 +13,7 @@ Open the printed URL on a phone (or a phone-sized browser window) in portrait.
 
 ## How to play
 
-First run includes a light FTUE: coach lines advance as you steer, eat, and deliver, and the first results screen points you at Sparks and the shop (shown once, persisted). Learner runs also ramp the palette gradually — you start with two colors (enough to see pips and matching work, and the portal can't hurt you until your first delivery), then the 3rd and 4th colors unlock at 2/4 deliveries with a "NEW COLOR!" burst. The ramp stays active across runs until completed once, then never returns.
+First run includes a light FTUE: coach lines advance as you steer, eat, and deliver, and the first results screen points you at Sparks and the shop (shown once, persisted). Learner runs also ramp the palette gradually — you start with two colors (enough to see pips and matching work, and the portal can't hurt you until your first delivery), then the 3rd and 4th colors unlock at 2/4 deliveries with a "NEW COLOR!" burst. The ramp stays active across runs until completed once, then never returns. Until the first delivery the request timer stays frozen until you've caught a few drops, and once your orb matches the request, marching guide dots lead from the orb to the portal.
 
 - Swipe/drag to impulse the orb (drag direction = force direction).
 - Eating a particle adds mass and a colored pip (the orb carries its last 3).
@@ -24,7 +24,7 @@ First run includes a light FTUE: coach lines advance as you steer, eat, and deli
 - Difficulty ramps over ~3 minutes: portal timers shrink and requests start demanding minimum mass ("6+"), pushing you into the instability zone.
 - Request variety kicks in as you survive: **rush** requests (fast-spinning ring, "2x") have half the time for double score; **pure** requests (triple ring, "PURE") demand all 3 pips in the request color for triple score and a double stability restore.
 - Past 90 s (and 5 deliveries) the **portal relocates** every few deliveries — it collapses and re-opens somewhere new, more often as difficulty ramps. Expired requests never move it, and a Second Chance revive always does.
-- **Pip thief raids** start around a minute in: a jittery red ring flickers in, hunts the orb for 12-18 s, then dissipates — with a 20-40 s breather before the next raid (two thieves per raid late-run). On contact it steals your newest pip (mass −1) and flees. It never touches stability or the chain — outrun or outlast it. The orb's rim flickers red as one closes in, and flashes red when robbed.
+- **Pip thief raids** start around a minute in: a jittery red ring flickers in, hunts the orb for 12-18 s, then dissipates — with a 20-40 s breather before the next raid (two thieves per raid late-run). On contact it steals your newest pip (mass is untouched, so a bite never vents overload pressure) and flees. It never touches stability or the chain — outrun or outlast it. The orb's rim flickers red as one closes in, and flashes red when robbed.
 - Bigger deliveries hit harder: BIG / HUGE / COLOSSAL celebrations, and fast strings of heavy deliveries build combo heat.
 - Deliveries also earn Sparks (persisted). Spend them in the **Shop** (results screen) on permanent upgrades: Reinforced Portal, Magnet Core, Dense Shell, Lock Battery.
 - When the portal collapses you get one **Second Chance** per run: watch a rewarded ad within 5 s to restore 50% stability and keep going.
