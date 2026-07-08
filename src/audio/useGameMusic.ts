@@ -24,7 +24,7 @@ const TRACK_URLS = [
 ];
 
 /** Ambience level: the music sits under the synth SFX, not over them. */
-const DEFAULT_VOLUME = 0.25;
+const DEFAULT_VOLUME = 0.175;
 const VOLUME_RAMP_S = 0.05;
 const FADE_OUT_S = 0.3;
 
