@@ -81,6 +81,10 @@ await page.evaluate(() => {
   CONFIG.portalTimeMin = 2;
   CONFIG.stabilityDrainExpire = 0.5;
   CONFIG.stabilityRestoreDelivery = 0;
+  // No boost freezes during the scripted run (tested explicitly below).
+  CONFIG.boostFirstAt = 9999;
+  // No bonus portals either: the scripted taps assume a single ring.
+  CONFIG.bonusRampStart = 9;
   // Skip the FTUE color ramp: this suite relies on expiry drain from the
   // first request on (the ramp's learner grace would block it).
   useGameStore.setState({ colorRampDone: true });
@@ -257,7 +261,7 @@ const state1 = await page.evaluate(() => {
 check('roundsPlayed incremented', state1.roundsPlayed >= 1, `rounds=${state1.roundsPlayed}`);
 
 // Rewarded: Color Lock offer -> mock ad modal -> claim.
-const clBtn = page.getByText('Color Lock — free 5s freeze next round');
+const clBtn = page.getByRole('button', { name: /Color Lock/i });
 if (await clBtn.isVisible()) {
   await clBtn.click();
   check('mock ad modal opens', await page.getByText('AD (mock)').isVisible());
@@ -337,6 +341,62 @@ await page.getByText('CLOSE').click();
 await page.waitForTimeout(400);
 const phase2 = await page.evaluate(() => window.__fizzion.useGameStore.getState().phase);
 check('round starts after interstitial', phase2 === 'playing', `phase=${phase2}`);
+
+// In-run boost pick: force a delivery at boostFirstAt=1, the modal freezes
+// the run, tapping a card resumes it.
+await page.evaluate(() => {
+  const { engine, CONFIG } = window.__fizzion;
+  CONFIG.boostFirstAt = 1;
+  CONFIG.boostOfferDelayMs = 50;
+  const p = engine.portal;
+  const c = p.color;
+  p.requestType = 'normal';
+  p.minMass = 0;
+  p.timeLeft = 30;
+  p.duration = 30;
+  p.rerollLeft = 0;
+  engine.orb.pips = [c];
+  engine.orb.color = c;
+  engine.orb.mass = 2;
+  engine.orb.x = p.x;
+  engine.orb.y = p.y;
+});
+await page.waitForFunction(
+  () => window.__fizzion.useGameStore.getState().boostOffer !== null,
+  null,
+  { timeout: 5000 },
+);
+check('boost modal appears after the delivery', await page.getByText('POWER SURGE').isVisible());
+check(
+  'engine frozen while the boost offer is up',
+  await page.evaluate(() => window.__fizzion.engine.paused),
+);
+// Touch guard: a stray tap during the announce window must not pick a card.
+await page.mouse.click(195, 420);
+await page.waitForTimeout(150);
+check(
+  'tap during the announce window does not pick a boost',
+  await page.evaluate(() => window.__fizzion.useGameStore.getState().boostOffer !== null),
+);
+await page.waitForTimeout(1300); // arming window passes
+check('boost reroll pill offered', await page.getByText('Reroll (ad)').isVisible());
+const firstCardName = await page.evaluate(() => {
+  const id = window.__fizzion.useGameStore.getState().boostOffer[0];
+  return window.__fizzion.boosts.BOOST_CATALOG.find((b) => b.id === id).name.toUpperCase();
+});
+await page.getByText(firstCardName, { exact: true }).click();
+await page.waitForTimeout(900); // pick-and-scatter exit plays before the pick lands
+const afterPick = await page.evaluate(() => {
+  const { engine, useGameStore, CONFIG } = window.__fizzion;
+  CONFIG.boostFirstAt = 9999; // stand down for the rest of the suite
+  const s = useGameStore.getState();
+  return { paused: engine.paused, offer: s.boostOffer, owned: s.ownedBoosts.length };
+});
+check(
+  'card tap applies the boost and resumes play',
+  !afterPick.paused && afterPick.offer === null && afterPick.owned === 1,
+  JSON.stringify(afterPick),
+);
 
 // Debug panel via keyboard.
 await page.keyboard.press('d');

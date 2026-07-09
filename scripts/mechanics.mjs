@@ -27,11 +27,14 @@ await page.mouse.click(195, 420); // start round
 await page.waitForTimeout(300);
 
 // Determinism: kill ambient food so tests fully control what the orb eats,
-// and block hazard auto-spawns (tested explicitly further down).
+// block hazard auto-spawns, and push the boost offer out of reach — both
+// are tested explicitly further down.
 await page.evaluate(() => {
   const { engine, CONFIG } = window.__fizzion;
   CONFIG.maxParticles = 0; // stops the periodic cluster top-up
   CONFIG.hazardMaxCount = 0;
+  CONFIG.boostFirstAt = 9999; // also gates the relocation-fused offers
+  CONFIG.bonusRampStart = 9; // no bonus portals (tested explicitly at the end)
   engine.particles.length = 0;
 });
 
@@ -389,6 +392,10 @@ const steal = await page.evaluate(async () => {
   const { engine } = window.__fizzion;
   engine.portal.timeLeft = 30; // no expiry noise during the test
   engine.portal.duration = 30;
+  // The relocation test left the portal at a random spot: park it far from
+  // the steal site so a matching orb can't accidentally deliver mid-test.
+  engine.portal.x = 340;
+  engine.portal.y = 120;
   engine.orb.x = 195;
   engine.orb.y = 600;
   engine.orb.vx = 0;
@@ -1050,6 +1057,694 @@ check(
   'portal request color has collectible food on the field',
   seed.requestedOnField >= 3,
   JSON.stringify(seed),
+);
+
+// --- In-run boosts: offer fires at the 3rd delivery and freezes the run ---
+const boostOffer = await page.evaluate(async () => {
+  const { engine, CONFIG, useGameStore } = window.__fizzion;
+  useGameStore.setState({ colorRampDone: true });
+  CONFIG.boostFirstAt = 3;
+  CONFIG.boostOfferDelayMs = 50;
+  CONFIG.maxParticles = 0;
+  CONFIG.hazardMaxCount = 0;
+  useGameStore.getState().beginRound();
+  engine.startRound();
+  engine.particles.length = 0;
+  await new Promise((r) => setTimeout(r, 300));
+
+  const c = '#00ff88';
+  const forceDeliver = async () => {
+    engine.orb.x = 60;
+    engine.orb.y = 760;
+    await new Promise((r) => setTimeout(r, 300)); // clear portal contact
+    const p = engine.portal;
+    p.requestType = 'normal';
+    p.color = c;
+    p.minMass = 0;
+    p.timeLeft = 30;
+    p.duration = 30;
+    p.rerollLeft = 0; // skip the reroll anim's contact lockout
+    engine.orb.pips = [c];
+    engine.orb.color = c;
+    engine.orb.mass = 2;
+    engine.orb.x = p.x;
+    engine.orb.y = p.y;
+    await new Promise((r) => setTimeout(r, 700)); // hit-stop + celebration
+  };
+  await forceDeliver();
+  await forceDeliver();
+  const offerAfterTwo = useGameStore.getState().boostOffer;
+  await forceDeliver();
+  await new Promise((r) => setTimeout(r, 400)); // offer delay + callback
+  const s = useGameStore.getState();
+  return {
+    deliveries: engine.deliveries,
+    offerAfterTwo,
+    offer: s.boostOffer,
+    unique: s.boostOffer ? new Set(s.boostOffer).size : 0,
+    paused: engine.paused,
+  };
+});
+check(
+  'boost offer fires at the 3rd delivery (not before), engine paused',
+  boostOffer.offerAfterTwo === null &&
+    Array.isArray(boostOffer.offer) &&
+    boostOffer.offer.length === 3 &&
+    boostOffer.unique === 3 &&
+    boostOffer.paused,
+  JSON.stringify(boostOffer),
+);
+check('boost pick modal visible', await page.getByText('POWER SURGE').isVisible());
+
+// --- Picking a card applies the boost and resumes the run ---
+const boostPick = await page.evaluate(async () => {
+  const { engine, useGameStore } = window.__fizzion;
+  const id = useGameStore.getState().boostOffer[0];
+  useGameStore.getState().chooseBoost(id);
+  await new Promise((r) => setTimeout(r, 100));
+  const s = useGameStore.getState();
+  return {
+    id,
+    paused: engine.paused,
+    offerCleared: s.boostOffer === null,
+    storeOwned: [...s.ownedBoosts],
+    engineOwned: [...engine.boosts],
+  };
+});
+check(
+  'chooseBoost applies, records ownership, and resumes the engine',
+  !boostPick.paused &&
+    boostPick.offerCleared &&
+    boostPick.storeOwned.length === 1 &&
+    boostPick.storeOwned[0] === boostPick.id &&
+    boostPick.engineOwned[0] === boostPick.id,
+  JSON.stringify(boostPick),
+);
+
+// --- Uniqueness: owned boosts never re-offered; pool drains to empty ---
+const boostRolls = await page.evaluate(() => {
+  const { engine, boosts } = window.__fizzion;
+  const all = boosts.BOOST_CATALOG.map((b) => b.id);
+  const rolled = [];
+  for (let i = 0; i < 30; i++) rolled.push(...boosts.rollBoostOptions(engine.boosts));
+  const reroll = engine.rerollBoosts();
+  return {
+    neverOwned: rolled.every((id) => !engine.boosts.includes(id)),
+    lastOne: boosts.rollBoostOptions(all.slice(0, 8)),
+    lastId: all[8],
+    empty: boosts.rollBoostOptions(all),
+    rerollLen: reroll.length,
+    rerollExcludesOwned: reroll.every((id) => !engine.boosts.includes(id)),
+  };
+});
+check(
+  'rolls never include owned boosts; short pool offered as-is; dry pool empty',
+  boostRolls.neverOwned &&
+    boostRolls.lastOne.length === 1 &&
+    boostRolls.lastOne[0] === boostRolls.lastId &&
+    boostRolls.empty.length === 0,
+  JSON.stringify(boostRolls),
+);
+check(
+  'reroll excludes owned and offers a fresh 3',
+  boostRolls.rerollLen === 3 && boostRolls.rerollExcludesOwned,
+  JSON.stringify(boostRolls),
+);
+
+// No more surprise offers while the effect tests deliver below.
+await page.evaluate(() => {
+  window.__fizzion.CONFIG.boostFirstAt = 9999;
+});
+
+// --- Long Fuse: chain window stretched by +4s on delivery ---
+const longFuse = await page.evaluate(async () => {
+  const { engine, CONFIG, boosts } = window.__fizzion;
+  boosts.resetRunMods(); // isolate from whatever card the pick test chose
+  boosts.applyBoost('long_fuse');
+  const c = '#00ff88';
+  // Park the portal away from the orb and clear the contact latch so the
+  // forced delivery below can't be swallowed (same guard as the steal and
+  // Prospector probes).
+  engine.portal.x = 340;
+  engine.portal.y = 120;
+  engine.orb.x = 60;
+  engine.orb.y = 760;
+  await new Promise((r) => setTimeout(r, 300));
+  const p = engine.portal;
+  p.contact = false;
+  p.requestType = 'normal';
+  p.color = c;
+  p.minMass = 0;
+  p.timeLeft = 30;
+  p.duration = 30;
+  p.rerollLeft = 0;
+  engine.orb.pips = [c];
+  engine.orb.color = c;
+  engine.orb.mass = 2;
+  engine.orb.x = p.x;
+  engine.orb.y = p.y;
+  await new Promise((r) => setTimeout(r, 400));
+  return { left: engine.chainTimeLeft, window: CONFIG.chainWindow };
+});
+check(
+  'Long Fuse: chain window exceeds the base after a delivery',
+  longFuse.left > longFuse.window + 2,
+  `left=${longFuse.left.toFixed(1)} base=${longFuse.window}`,
+);
+
+// --- Prism: a 4th pip is carried and counts for pure eligibility ---
+const prism = await page.evaluate(async () => {
+  const { engine, boosts } = window.__fizzion;
+  boosts.resetRunMods();
+  boosts.applyBoost('prism');
+  const c = '#00cfff';
+  const orb = engine.orb;
+  orb.x = 195;
+  orb.y = 600;
+  orb.pips = [];
+  const eat = (color) => {
+    engine.particles.push({
+      x: orb.x, y: orb.y, vx: 0, vy: 0, color, phase: 0,
+      state: 'attract', ax: orb.x, ay: orb.y, attractT: 1,
+    });
+    return new Promise((r) => setTimeout(r, 60));
+  };
+  await eat(c);
+  await eat(c);
+  await eat(c);
+  await eat(c);
+  const pipCount = engine.orb.pips.length;
+
+  // Pure request satisfied by 4 matching pips.
+  engine.orb.x = 60;
+  engine.orb.y = 760;
+  await new Promise((r) => setTimeout(r, 300));
+  const p = engine.portal;
+  p.requestType = 'pure';
+  p.color = c;
+  p.minMass = 0;
+  p.timeLeft = 30;
+  p.duration = 30;
+  p.rerollLeft = 0;
+  engine.orb.pips = [c, c, c, c];
+  engine.orb.color = c;
+  engine.orb.mass = 6;
+  const scoreBefore = engine.score;
+  engine.orb.x = p.x;
+  engine.orb.y = p.y;
+  await new Promise((r) => setTimeout(r, 400));
+  return { pipCount, delivered: engine.score > scoreBefore };
+});
+check(
+  'Prism: 4 pips carried, pure request accepts the 4-stack',
+  prism.pipCount === 4 && prism.delivered,
+  JSON.stringify(prism),
+);
+
+// --- Insurance: the next chain break is forgiven, exactly once ---
+const insurance = await page.evaluate(async () => {
+  const { engine, boosts } = window.__fizzion;
+  boosts.resetRunMods();
+  boosts.applyBoost('insurance');
+  const c = '#ffd500';
+  engine.orb.x = 60;
+  engine.orb.y = 760;
+  engine.orb.pips = [c];
+  engine.orb.color = c;
+  engine.chain = 3;
+  engine.chainTimeLeft = 30;
+
+  const wasteExpiry = async () => {
+    engine.stability = 1;
+    engine.portal.rerollLeft = 0;
+    engine.portal.lockLeft = 0;
+    engine.portal.color = c; // orb matches: expiring is a wasted match
+    engine.portal.timeLeft = 0.01;
+    await new Promise((r) => setTimeout(r, 300));
+  };
+  await wasteExpiry();
+  const afterShield = { chain: engine.chain, shields: boosts.runMods.chainShields };
+  engine.chainTimeLeft = 30; // rearm the window for the second waste
+  await wasteExpiry();
+  return { afterShield, chainAfterSecond: engine.chain };
+});
+check(
+  'Insurance forgives one wasted expiry, then the next break lands',
+  insurance.afterShield.chain === 3 &&
+    insurance.afterShield.shields === 0 &&
+    insurance.chainAfterSecond === 0,
+  JSON.stringify(insurance),
+);
+
+// --- Controlled Burn: overload on the portal delivers half mass, no pop ---
+const burn = await page.evaluate(async () => {
+  const { engine, CONFIG, boosts } = window.__fizzion;
+  boosts.resetRunMods();
+  boosts.applyBoost('controlled_burn');
+  const p = engine.portal;
+  const orb = engine.orb;
+  const c = '#ff2975';
+  await new Promise((r) => setTimeout(r, 600)); // reroll anim settles
+  orb.x = p.x;
+  orb.y = p.y;
+  orb.vx = 0;
+  orb.vy = 0;
+  p.contact = true; // parked on the portal without triggering a delivery
+  p.timeLeft = 30;
+  p.duration = 30;
+  orb.pips = [c, c, c];
+  orb.color = c;
+  orb.mass = CONFIG.overloadMass - 1;
+  const before = {
+    score: engine.score,
+    overloads: engine.overloads,
+    stability: engine.stability,
+  };
+  engine.particles.push({
+    x: orb.x, y: orb.y, vx: 0, vy: 0, color: c, phase: 0,
+    state: 'attract', ax: orb.x, ay: orb.y, attractT: 1,
+  });
+  await new Promise((r) => setTimeout(r, 500)); // consume -> burn -> celebration
+  return {
+    gainedScore: engine.score > before.score,
+    overloadsUnchanged: engine.overloads === before.overloads,
+    noScatter: !engine.particles.some((q) => q.expireLife !== undefined),
+    noStabilityDrain: engine.stability >= before.stability - 0.001,
+  };
+});
+check(
+  'Controlled Burn: scores instead of popping (no scatter, no drain)',
+  burn.gainedScore && burn.overloadsUnchanged && burn.noScatter && burn.noStabilityDrain,
+  JSON.stringify(burn),
+);
+
+// --- Pressure Valve: capacity-aware auto-collect, no re-overload loop ---
+const valve = await page.evaluate(async () => {
+  const { engine, CONFIG, boosts } = window.__fizzion;
+  boosts.resetRunMods();
+  boosts.applyBoost('pressure_valve');
+  const orb = engine.orb;
+  const c = '#00ff88';
+  // Park in a corner, away from the portal, and pop the orb.
+  orb.x = 60;
+  orb.y = 760;
+  orb.vx = 0;
+  orb.vy = 0;
+  orb.pips = [c, c, c];
+  orb.color = c;
+  orb.mass = CONFIG.overloadMass - 1;
+  const overloadsBefore = engine.overloads;
+  engine.particles.push({
+    x: orb.x, y: orb.y, vx: 0, vy: 0, color: c, phase: 0,
+    state: 'attract', ax: orb.x, ay: orb.y, attractT: 1,
+  });
+  await new Promise((r) => setTimeout(r, 250)); // pop lands, grace still on
+  // Step clear of the debris field so only the valve's pull (not natural
+  // proximity collection) is measured.
+  engine.orb.x = 330;
+  engine.orb.y = 140;
+  engine.orb.vx = 0;
+  engine.orb.vy = 0;
+  // Grace (0.5s) + auto-collect flight time: plenty for a loop to show.
+  await new Promise((r) => setTimeout(r, 2250));
+  return {
+    extraOverloads: engine.overloads - overloadsBefore,
+    mass: engine.orb.mass,
+    fillTo: CONFIG.boostValveMaxMass,
+    collectedSome: engine.orb.mass > 5,
+  };
+});
+check(
+  'Pressure Valve: refills only to the working-mass cap, never re-pops the orb',
+  valve.extraOverloads === 1 && valve.mass <= valve.fillTo && valve.collectedSome,
+  JSON.stringify(valve),
+);
+
+// --- Offer pacing: a relocation inside the min gap defers its offer ---
+const offerGap = await page.evaluate(async () => {
+  const { engine, CONFIG, useGameStore } = window.__fizzion;
+  CONFIG.boostFirstAt = 3; // re-enable offers for this test
+  CONFIG.boostOfferDelayMs = 50;
+  CONFIG.relocateMinDistFrac = 0.25;
+  useGameStore.getState().beginRound();
+  engine.startRound();
+  engine.particles.length = 0;
+  await new Promise((r) => setTimeout(r, 300));
+
+  const c = '#00ff88';
+  const forceDeliver = async () => {
+    engine.orb.x = 60;
+    engine.orb.y = 760;
+    await new Promise((r) => setTimeout(r, 300)); // clear portal contact
+    const p = engine.portal;
+    p.requestType = 'normal';
+    p.color = c;
+    p.minMass = 0;
+    p.timeLeft = 30;
+    p.duration = 30;
+    p.rerollLeft = 0;
+    engine.orb.pips = [c];
+    engine.orb.color = c;
+    engine.orb.mass = 2;
+    engine.orb.x = p.x;
+    engine.orb.y = p.y;
+    await new Promise((r) => setTimeout(r, 700)); // hit-stop + celebration
+  };
+
+  // Pretend the delivery-3 offer just fired, then force a relocation-eligible
+  // delivery inside the gap (delivery 5: 5 - 3 = 2 < boostMinGapDeliveries).
+  engine.deliveries = 4; // next delivery hits relocateMinDeliveries (5)
+  engine.lastBoostOfferAt = 3;
+  engine.runTime = CONFIG.relocateMinTime + 1;
+  engine.deliveriesSinceRelocate = 10;
+  const portalBefore = { x: engine.portal.x, y: engine.portal.y };
+  await forceDeliver();
+  await new Promise((r) => setTimeout(r, 400));
+  const insideGap = {
+    offer: useGameStore.getState().boostOffer,
+    relocated:
+      Math.hypot(engine.portal.x - portalBefore.x, engine.portal.y - portalBefore.y) > 1,
+  };
+
+  // Past the gap (delivery 7: 7 - 3 >= 4) the relocation carries the offer.
+  engine.deliveries = 6;
+  engine.deliveriesSinceRelocate = 10;
+  await forceDeliver();
+  await new Promise((r) => setTimeout(r, 400));
+  const offer = useGameStore.getState().boostOffer;
+  const pastGap = { offer, paused: engine.paused };
+  if (offer) useGameStore.getState().chooseBoost(offer[0]); // resume
+  CONFIG.boostFirstAt = 9999; // stand down again
+  return { insideGap, pastGap };
+});
+check(
+  'relocation inside the offer gap jumps the portal but defers the cards',
+  offerGap.insideGap.offer === null && offerGap.insideGap.relocated,
+  JSON.stringify(offerGap.insideGap),
+);
+check(
+  'relocation past the offer gap carries the next offer',
+  Array.isArray(offerGap.pastGap.offer) &&
+    offerGap.pastGap.offer.length === 3 &&
+    offerGap.pastGap.paused,
+  JSON.stringify(offerGap.pastGap),
+);
+
+// --- New permanent upgrades: catalogue -> effects mapping ---
+const upgradeMap = await page.evaluate(() => {
+  const { useGameStore, upgradeEffects } = window.__fizzion;
+  useGameStore.setState({ sparks: 99999 });
+  for (const id of ['prospector', 'ward', 'second_chance_plus', 'sticky_drops', 'warm_start']) {
+    useGameStore.getState().buyUpgrade(id);
+  }
+  return { ...upgradeEffects };
+});
+check(
+  'new upgrades map to effects (level 1 each)',
+  Math.abs(upgradeMap.sparksMult - 1.1) < 1e-9 &&
+    Math.abs(upgradeMap.hazardLifeMult - 0.8) < 1e-9 &&
+    Math.abs(upgradeMap.hazardCooldownMult - 1.2) < 1e-9 &&
+    Math.abs(upgradeMap.reviveStabilityBonus - 0.15) < 1e-9 &&
+    Math.abs(upgradeMap.scatterLifeBonus - 0.5) < 1e-9 &&
+    upgradeMap.warmStartBonus === 2,
+  JSON.stringify(upgradeMap),
+);
+
+// --- Prospector: delivery Sparks scaled by 10% ---
+const prospector = await page.evaluate(async () => {
+  const { engine, boosts, useGameStore } = window.__fizzion;
+  // The offer-gap test ends with cards up and the engine paused: pick one to
+  // resume, then wipe run mods so this probe only measures the upgrade.
+  const leftover = useGameStore.getState().boostOffer;
+  if (leftover) useGameStore.getState().chooseBoost(leftover[0]);
+  boosts.resetRunMods();
+  const c = '#00ff88';
+  engine.chain = 0;
+  engine.chainTimeLeft = 0;
+  // Park the portal away from the orb: a random relocation may have dropped
+  // it on our corner, which would latch p.contact and swallow the delivery.
+  engine.portal.x = 340;
+  engine.portal.y = 120;
+  engine.orb.x = 60;
+  engine.orb.y = 760;
+  await new Promise((r) => setTimeout(r, 300));
+  const p = engine.portal;
+  p.contact = false;
+  p.requestType = 'normal';
+  p.color = c;
+  p.minMass = 0;
+  p.timeLeft = 30;
+  p.duration = 30;
+  p.rerollLeft = 0;
+  engine.orb.pips = [c];
+  engine.orb.color = c;
+  engine.orb.mass = 10;
+  const sparksBefore = engine.sparksEarned;
+  engine.orb.x = p.x;
+  engine.orb.y = p.y;
+  await new Promise((r) => setTimeout(r, 400));
+  return { gained: engine.sparksEarned - sparksBefore, expected: Math.ceil((10 * 1 * 1.1) / 2) };
+});
+check(
+  'Prospector scales delivery Sparks (ceil of +10%)',
+  prospector.gained === prospector.expected && prospector.gained === 6,
+  JSON.stringify(prospector),
+);
+
+// --- Ward: raids spawn shorter, next cooldown longer ---
+const ward = await page.evaluate(async () => {
+  const { engine, CONFIG } = window.__fizzion;
+  engine.hazards.length = 0;
+  CONFIG.hazardMaxCount = 2;
+  engine.hazardCooldown = 0.05;
+  engine.runTime = 1e6; // difficulty pinned at 1
+  await new Promise((r) => setTimeout(r, 250));
+  const lives = engine.hazards.map((hz) => hz.life);
+  const cooldown = engine.hazardCooldown;
+  CONFIG.hazardMaxCount = 0;
+  engine.hazards.length = 0;
+  return {
+    lives,
+    maxAllowed: CONFIG.hazardLifeMax * 0.8 + 0.05,
+    cooldown,
+    expectedCooldown: CONFIG.hazardCooldownMin * 1.2,
+  };
+});
+check(
+  'Ward shortens raid life 20% and stretches the raid cooldown 20%',
+  ward.lives.length === 2 &&
+    ward.lives.every((l) => l <= ward.maxAllowed) &&
+    Math.abs(ward.cooldown - ward.expectedCooldown) < 0.3,
+  JSON.stringify(ward),
+);
+
+// --- Sticky Drops: overload debris lives 0.5s longer ---
+const sticky = await page.evaluate(async () => {
+  const { engine, CONFIG } = window.__fizzion;
+  const c = '#00cfff';
+  engine.orb.x = 60;
+  engine.orb.y = 760;
+  engine.orb.vx = 0;
+  engine.orb.vy = 0;
+  engine.orb.pips = [c, c, c];
+  engine.orb.color = c;
+  engine.orb.mass = CONFIG.overloadMass - 1;
+  engine.particles.push({
+    x: engine.orb.x, y: engine.orb.y, vx: 0, vy: 0, color: c, phase: 0,
+    state: 'attract', ax: engine.orb.x, ay: engine.orb.y, attractT: 1,
+  });
+  await new Promise((r) => setTimeout(r, 150));
+  const maxLife = Math.max(
+    ...engine.particles.filter((q) => q.expireLife !== undefined).map((q) => q.expireLife),
+  );
+  return { maxLife, base: CONFIG.overloadParticleLife };
+});
+check(
+  'Sticky Drops extends debris lifetime by ~0.5s',
+  sticky.maxLife > sticky.base + 0.25,
+  `life=${sticky.maxLife.toFixed(2)} base=${sticky.base}`,
+);
+
+// --- Warm Start: early requests +2s, gone after the 3rd delivery ---
+const warmStart = await page.evaluate(async () => {
+  const { engine } = window.__fizzion;
+  engine.runTime = 1; // difficulty ~0: deterministic normal requests
+  const expire = async () => {
+    engine.stability = 1;
+    engine.portal.rerollLeft = 0;
+    engine.portal.lockLeft = 0;
+    engine.portal.timeLeft = 0.01;
+    await new Promise((r) => setTimeout(r, 200));
+    return engine.portal.duration;
+  };
+  engine.deliveries = 0;
+  const early = await expire();
+  engine.deliveries = 5;
+  const late = await expire();
+  return { early, late, diff: early - late };
+});
+check(
+  'Warm Start stretches request timers only before the 3rd delivery',
+  Math.abs(warmStart.diff - 2) < 0.2,
+  JSON.stringify(warmStart),
+);
+
+// --- Second Chance+: revive restores 65% ---
+const revivePlus = await page.evaluate(async () => {
+  const { engine, useGameStore, CONFIG } = window.__fizzion;
+  engine.portal.lockLeft = 0;
+  engine.portal.rerollLeft = 0;
+  engine.stability = 0.01;
+  engine.portal.timeLeft = 0.01;
+  await new Promise((r) => setTimeout(r, 600));
+  const offered = useGameStore.getState().phase === 'revive';
+  engine.revive();
+  useGameStore.getState().acceptRevive();
+  await new Promise((r) => setTimeout(r, 200));
+  return {
+    offered,
+    stability: engine.stability,
+    expected: CONFIG.reviveStability + 0.15,
+  };
+});
+check(
+  'Second Chance+ revive restores the boosted stability',
+  revivePlus.offered && Math.abs(revivePlus.stability - revivePlus.expected) < 0.05,
+  JSON.stringify(revivePlus),
+);
+
+// --- Upgrade cost curve: level 1 stays cheap, the total sink is deep ---
+const costCurve = await page.evaluate(() => {
+  const { UPGRADE_CATALOG } = window.__fizzion;
+  const total = UPGRADE_CATALOG.reduce((s, u) => s + u.costs.reduce((a, c) => a + c, 0), 0);
+  const cheapestFirst = Math.min(...UPGRADE_CATALOG.map((u) => u.costs[0]));
+  const count200 = UPGRADE_CATALOG.flatMap((u) => u.costs).filter((c) => c === 200).length;
+  return { total, cheapestFirst, count200 };
+});
+check(
+  'upgrade cost curve: ~49k total sink, cheap entry, 200 stays unique',
+  costCurve.total === 49250 && costCurve.cheapestFirst === 150 && costCurve.count200 === 1,
+  JSON.stringify(costCurve),
+);
+
+// --- Bonus portal: ramp-gated spawn ---
+const bonusSpawn = await page.evaluate(async () => {
+  const { engine, CONFIG, boosts } = window.__fizzion;
+  boosts.resetRunMods();
+  CONFIG.bonusRampStart = 0.25; // restore the real gate
+  engine.portal.timeLeft = 30; // keep the main portal quiet
+  engine.stability = 0.8;
+
+  // Below the gate: a zeroed countdown must not spawn anything.
+  engine.runTime = 1;
+  engine.bonusCountdown = 0.01;
+  await new Promise((r) => setTimeout(r, 250));
+  const gated = engine.bonusPortal === null;
+
+  // Past the gate it spawns, colored, short-lived, clear of the main portal.
+  engine.runTime = CONFIG.rampDuration;
+  engine.bonusCountdown = 0.01;
+  await new Promise((r) => setTimeout(r, 300));
+  const bp = engine.bonusPortal;
+  return {
+    gated,
+    spawned: bp !== null,
+    lifetime: bp ? bp.duration : -1,
+    clearOfMain: bp
+      ? Math.hypot(bp.x - engine.portal.x, bp.y - engine.portal.y) >= 100
+      : false,
+  };
+});
+check(
+  'bonus portal spawns only past the ramp gate, away from the main portal',
+  bonusSpawn.gated &&
+    bonusSpawn.spawned &&
+    bonusSpawn.lifetime === 10 &&
+    bonusSpawn.clearOfMain,
+  JSON.stringify(bonusSpawn),
+);
+
+// --- Bonus portal: missing it costs nothing ---
+const bonusMiss = await page.evaluate(async () => {
+  const { engine, useGameStore } = window.__fizzion;
+  engine.portal.timeLeft = 30;
+  engine.stability = 0.8;
+  const chainBefore = engine.chain;
+  engine.bonusPortal.timeLeft = 0.01;
+  await new Promise((r) => setTimeout(r, 300));
+  return {
+    despawned: engine.bonusPortal === null,
+    stability: engine.stability,
+    chainKept: engine.chain === chainBefore,
+    storeCleared: useGameStore.getState().bonusActive === false,
+  };
+});
+check(
+  'missed bonus fades with no stability drain and no chain break',
+  bonusMiss.despawned &&
+    Math.abs(bonusMiss.stability - 0.8) < 0.01 &&
+    bonusMiss.chainKept &&
+    bonusMiss.storeCleared,
+  JSON.stringify(bonusMiss),
+);
+
+// --- Bonus delivery: double Sparks, chain bump, no pacing side effects ---
+const bonusDeliver = await page.evaluate(async () => {
+  const { engine, CONFIG, useGameStore } = window.__fizzion;
+  engine.portal.timeLeft = 30;
+  engine.chain = 0;
+  engine.chainTimeLeft = 0;
+  // Park the orb away, then respawn a bonus portal.
+  engine.orb.x = 60;
+  engine.orb.y = 760;
+  engine.bonusCountdown = 0.01;
+  await new Promise((r) => setTimeout(r, 300));
+  const bp = engine.bonusPortal;
+  if (!bp) return { spawned: false };
+  const storeSawIt = useGameStore.getState().bonusActive === true;
+  bp.rerollLeft = 0; // skip the open animation
+  bp.contact = false;
+  const c = bp.color;
+  engine.orb.pips = [c];
+  engine.orb.color = c;
+  engine.orb.mass = 10;
+  const sparksBefore = engine.sparksEarned;
+  const deliveriesBefore = engine.deliveries;
+  engine.orb.x = bp.x;
+  engine.orb.y = bp.y;
+  await new Promise((r) => setTimeout(r, 700)); // hit-stop + celebration
+  return {
+    spawned: true,
+    storeSawIt,
+    gained: engine.sparksEarned - sparksBefore,
+    // mass 10, chain 1, Prospector 1.1, bonus x2 -> ceil(10*1*1.1*2/2) = 11
+    expected: Math.ceil((10 * 1 * 1.1 * CONFIG.bonusSparksMult) / CONFIG.sparksDivisor),
+    chain: engine.chain,
+    deliveriesUnchanged: engine.deliveries === deliveriesBefore,
+    closed: engine.bonusPortal === null,
+    // First use retires the persistent coach line (requestsTaught.bonus).
+    bonusDeliveries: engine.bonusDeliveries,
+    taughtByUse: useGameStore.getState().requestsTaught.bonus === true,
+  };
+});
+check(
+  'bonus delivery pays double Sparks, bumps the chain, skips pacing counters',
+  bonusDeliver.spawned &&
+    bonusDeliver.storeSawIt &&
+    bonusDeliver.gained === bonusDeliver.expected &&
+    bonusDeliver.gained === 11 &&
+    bonusDeliver.chain === 1 &&
+    bonusDeliver.deliveriesUnchanged &&
+    bonusDeliver.closed,
+  JSON.stringify(bonusDeliver),
+);
+check(
+  'first bonus use marks the coach line as taught',
+  bonusDeliver.bonusDeliveries === 1 && bonusDeliver.taughtByUse,
+  JSON.stringify({
+    bonusDeliveries: bonusDeliver.bonusDeliveries,
+    taught: bonusDeliver.taughtByUse,
+  }),
 );
 
 check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));

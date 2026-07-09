@@ -181,6 +181,77 @@ class Synth {
     sub.stop(t + 0.6);
   }
 
+  /**
+   * Power Surge slam: rising charge-up whoosh into a bright impact stab,
+   * scheduled so the hit lands with the title spring (~0.15s in). Positive
+   * cousin of boom() — the noise sweeps up, not down, and the stab shares
+   * the delivery chime's harmonic family.
+   */
+  surge(): void {
+    if (!this.ready) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const impact = t + 0.15; // matches the title landing / flash / shake
+
+    // Riser: pitch sweep climbing into the hit.
+    const rise = ctx.createOscillator();
+    const rg = ctx.createGain();
+    rise.type = 'sawtooth';
+    rise.frequency.setValueAtTime(160, t);
+    rise.frequency.exponentialRampToValueAtTime(880, impact);
+    rg.gain.setValueAtTime(0.04, t);
+    rg.gain.exponentialRampToValueAtTime(0.12, impact);
+    rg.gain.exponentialRampToValueAtTime(0.0001, impact + 0.05);
+    rise.connect(rg).connect(this.master!);
+    rise.start(t);
+    rise.stop(impact + 0.1);
+
+    // Whoosh: noise through an opening highpass (anticipation, not collapse).
+    const wh = ctx.createBufferSource();
+    wh.buffer = this.noise();
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.setValueAtTime(400, t);
+    hp.frequency.exponentialRampToValueAtTime(3200, impact);
+    const wg = ctx.createGain();
+    wg.gain.setValueAtTime(0.02, t);
+    wg.gain.exponentialRampToValueAtTime(0.1, impact);
+    wg.gain.exponentialRampToValueAtTime(0.0001, impact + 0.08);
+    wh.connect(hp).connect(wg).connect(this.master!);
+    wh.start(t, 0, 0.35);
+
+    // Impact: bright electric stab (root + fifth + octave).
+    for (const [freq, gain, decay] of [
+      [523.25, 0.2, 0.35],
+      [784, 0.1, 0.3],
+      [1046.5, 0.06, 0.25],
+    ] as const) {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.setValueAtTime(gain, impact);
+      g.gain.exponentialRampToValueAtTime(0.0001, impact + decay);
+      osc.connect(g).connect(this.master!);
+      osc.start(impact);
+      osc.stop(impact + decay + 0.05);
+    }
+
+    // Short punchy thump — weight without the overload's doom rumble.
+    const sub = ctx.createOscillator();
+    const sg = ctx.createGain();
+    sub.type = 'sine';
+    sub.frequency.setValueAtTime(130, impact);
+    sub.frequency.exponentialRampToValueAtTime(60, impact + 0.18);
+    sg.gain.setValueAtTime(0.0001, t);
+    sg.gain.setValueAtTime(0.22, impact);
+    sg.gain.exponentialRampToValueAtTime(0.0001, impact + 0.22);
+    sub.connect(sg).connect(this.master!);
+    sub.start(impact);
+    sub.stop(impact + 0.25);
+  }
+
   /** Faint tick used by the results-screen score count-up. */
   tick(): void {
     if (!this.ready) return;

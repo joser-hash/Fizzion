@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { HudSnapshot, RoundStats } from '../lib/engine/engine';
+import { engine, type HudSnapshot, type RoundStats } from '../lib/engine/engine';
 import type { RequestType } from '../lib/engine/portal';
 import { CONFIG, IAP_CATALOG, UPGRADE_CATALOG } from '../lib/constants';
 import { applyUpgradeLevels } from '../lib/upgrades';
@@ -22,8 +22,8 @@ export interface PersistedData {
   adsRemoved: boolean;
   /** First-run tutorial completed (coach toasts never show again). */
   ftueDone: boolean;
-  /** Portal request labels already explained once ("N+", rush, pure). */
-  requestsTaught: { minMass?: boolean; rush?: boolean; pure?: boolean };
+  /** Portal request labels already explained once ("N+", rush, pure, bonus). */
+  requestsTaught: { minMass?: boolean; rush?: boolean; pure?: boolean; bonus?: boolean };
   /** FTUE color ramp completed: runs start with the full palette (save v4). */
   colorRampDone: boolean;
 }
@@ -107,8 +107,16 @@ interface GameStore extends PersistedData {
   /** Current portal request, mirrored for the request coach. */
   requestType: RequestType;
   requestMinMass: number;
+  /** A bonus portal is on screen (drives the first-use explainer). */
+  bonusActive: boolean;
+  /** Bonus deliveries this run (first one retires the explainer forever). */
+  bonusDeliveries: number;
 
   colorLockCharges: number;
+  /** Boost pick in progress: option ids while the engine is frozen, else null. */
+  boostOffer: string[] | null;
+  /** Boosts picked this run (session state — surfaced on the results screen). */
+  ownedBoosts: string[];
   lastRound: LastRound | null;
   /** Stats held while the Second Chance (revive) offer is on screen. */
   pendingStats: RoundStats | null;
@@ -135,6 +143,12 @@ interface GameStore extends PersistedData {
    * through engine.abandonRevive(), whose onRoundEnd lands in finishRound.
    */
   acceptRevive(): void;
+  /** Engine froze for a boost pick: surface the 3-card modal. */
+  offerBoosts(options: string[]): void;
+  /** Player picked a card: apply it in the engine and resume play. */
+  chooseBoost(id: string): void;
+  /** Rewarded reroll: replace the offer with a fresh roll (excluding owned). */
+  rerollBoosts(): void;
   doubleDown(): void;
   addColorLockCharge(): void;
   useColorLockCharge(): void;
@@ -152,7 +166,7 @@ interface GameStore extends PersistedData {
   /** Mark the first-run tutorial as seen forever. */
   completeFtue(): void;
   /** Mark one portal request label as explained forever. */
-  markRequestTaught(kind: 'minMass' | 'rush' | 'pure'): void;
+  markRequestTaught(kind: 'minMass' | 'rush' | 'pure' | 'bonus'): void;
 }
 
 const initialPersisted = loadPersisted();
@@ -174,7 +188,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
   overloads: 0,
   requestType: 'normal',
   requestMinMass: 0,
+  bonusActive: false,
+  bonusDeliveries: 0,
   colorLockCharges: 0,
+  boostOffer: null,
+  ownedBoosts: [],
   lastRound: null,
   pendingStats: null,
   sessionBest: 0,
@@ -205,6 +223,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       overloads: snap.overloads,
       requestType: snap.requestType,
       requestMinMass: snap.requestMinMass,
+      bonusActive: snap.bonusActive,
+      bonusDeliveries: snap.bonusDeliveries,
     })),
 
   beginRound: () =>
@@ -212,6 +232,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
       phase: 'playing',
       lastRound: null,
       rewardedThisRun: false,
+      boostOffer: null,
+      ownedBoosts: [],
       // Lock Battery: every run starts with at least one Color Lock charge.
       colorLockCharges:
         (s.upgrades['lock_battery'] ?? 0) > 0
@@ -242,6 +264,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
   offerRevive: (stats) => set({ phase: 'revive', pendingStats: stats }),
 
   acceptRevive: () => set({ phase: 'playing', pendingStats: null }),
+
+  offerBoosts: (options) => set({ boostOffer: options }),
+
+  chooseBoost: (id) => {
+    engine.applyBoost(id);
+    set((s) => ({ boostOffer: null, ownedBoosts: [...s.ownedBoosts, id] }));
+  },
+
+  rerollBoosts: () => {
+    const options = engine.rerollBoosts();
+    if (options.length > 0) set({ boostOffer: options });
+  },
 
   doubleDown: () => {
     const s = get();

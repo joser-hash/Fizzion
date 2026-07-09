@@ -94,7 +94,7 @@ export function scatterOverload(
     const s = rand(180, 460);
     p.vx = Math.cos(a) * s;
     p.vy = Math.sin(a) * s;
-    p.expireLife = CONFIG.overloadParticleLife;
+    p.expireLife = CONFIG.overloadParticleLife + upgradeEffects.scatterLifeBonus;
     p.collectDelay = CONFIG.overloadCollectDelay;
     list.push(p);
   }

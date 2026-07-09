@@ -4,6 +4,7 @@ import { IAP_CATALOG, UPGRADE_CATALOG } from '../lib/constants';
 import { purchaseService } from '../lib/ads';
 import { useGameStore } from '../store/gameStore';
 import { SparkIcon } from './SparkIcon';
+import { GAME_ICONS } from './GameIcons';
 
 function LevelPips({ level, max }: { level: number; max: number }) {
   return (
@@ -76,13 +77,21 @@ export function ShopModal({ open, onClose }: { open: boolean; onClose: () => voi
                 const maxed = level >= u.maxLevel;
                 const cost = maxed ? 0 : u.costs[level];
                 const affordable = !maxed && sparks >= cost;
+                const Icon = GAME_ICONS[u.id];
                 return (
                   <div
                     key={u.id}
                     className="rounded-xl border border-white/10 bg-white/[0.04] p-3"
                   >
                     <div className="flex items-center justify-between">
-                      <div className="text-sm font-bold text-white">{u.name}</div>
+                      <div className="flex items-center gap-2 text-sm font-bold text-white">
+                        {Icon && (
+                          <span className="text-[#ffd500]">
+                            <Icon size={20} />
+                          </span>
+                        )}
+                        {u.name}
+                      </div>
                       <LevelPips level={level} max={u.maxLevel} />
                     </div>
                     <div className="mt-1 text-xs leading-snug text-white/45">{u.desc}</div>

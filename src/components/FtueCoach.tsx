@@ -228,12 +228,13 @@ function CoachToast({
   );
 }
 
-type RequestKind = 'minMass' | 'rush' | 'pure';
+type RequestKind = 'minMass' | 'rush' | 'pure' | 'bonus';
 
 const REQUEST_TEXT: Record<RequestKind, string> = {
   minMass: 'This portal wants a bigger orb — grow it to the number shown first',
   rush: 'RUSH — half the time, double the score!',
   pure: 'PURE — all 3 of your dots must match the color',
+  bonus: 'BONUS RING — double Sparks, and no harm done if it fades',
 };
 
 /**
@@ -251,6 +252,8 @@ export function RequestCoach() {
 function RequestCoachInner() {
   const requestType = useGameStore((s) => s.requestType);
   const requestMinMass = useGameStore((s) => s.requestMinMass);
+  const bonusActive = useGameStore((s) => s.bonusActive);
+  const bonusDeliveries = useGameStore((s) => s.bonusDeliveries);
   const taught = useGameStore((s) => s.requestsTaught);
   const markRequestTaught = useGameStore((s) => s.markRequestTaught);
   const roundsPlayed = useGameStore((s) => s.roundsPlayed);
@@ -266,11 +269,23 @@ function RequestCoachInner() {
     [],
   );
 
+  // Bonus is taught by *use*, not by sighting: the line stays up for the
+  // whole life of every bonus portal until the player banks one, then
+  // retires forever.
+  useEffect(() => {
+    if (bonusDeliveries > 0 && !taught.bonus) markRequestTaught('bonus');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bonusDeliveries, taught.bonus]);
+
+  const firstRunCoachBusy = roundsPlayed === 0 && !ftueDone && coachStep !== 'done';
+  const bonusCoach = bonusActive && !taught.bonus && !firstRunCoachBusy;
+
   useEffect(() => {
     if (toast) return; // one line at a time
     // Yield while the first-run coach still owns the toast slot; untaught
-    // labels simply wait for a later sighting.
-    if (roundsPlayed === 0 && !ftueDone && coachStep !== 'done') return;
+    // labels simply wait for a later sighting. Same while the persistent
+    // bonus line has the slot — marking a label it would hide wastes it.
+    if (firstRunCoachBusy || bonusCoach) return;
     const kind: RequestKind | null =
       requestMinMass > 0
         ? 'minMass'
@@ -284,12 +299,12 @@ function RequestCoachInner() {
     setToast(kind);
     hideTimer.current = setTimeout(() => setToast(null), 4500);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestType, requestMinMass, taught, toast, roundsPlayed, ftueDone]);
+  }, [requestType, requestMinMass, taught, toast, firstRunCoachBusy, bonusCoach]);
 
   return (
     <CoachToast
-      text={toast ? REQUEST_TEXT[toast] : null}
-      toastKey={toast ?? 'none'}
+      text={bonusCoach ? REQUEST_TEXT.bonus : toast ? REQUEST_TEXT[toast] : null}
+      toastKey={bonusCoach ? 'bonus' : (toast ?? 'none')}
       urgent
     />
   );

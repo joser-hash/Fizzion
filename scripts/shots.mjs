@@ -77,6 +77,36 @@ await page.evaluate(() => {
   window.__fizzion.engine.hazards.length = 0;
 });
 
+// Bonus portal: golden double ring + BONUS tag next to the main portal.
+await page.evaluate(() => {
+  const { engine, CONFIG } = window.__fizzion;
+  CONFIG.hazardMaxCount = 0; // no raids photobombing the shot
+  engine.runTime = CONFIG.rampDuration; // past the bonus ramp gate
+  engine.bonusCountdown = 0.01;
+});
+await page.waitForTimeout(700); // spawn + open animation settles
+await page.screenshot({ path: 'scripts/shot-bonus.png' });
+await page.evaluate(() => {
+  const { engine } = window.__fizzion;
+  engine.bonusPortal = null;
+  engine.bonusCountdown = 9999;
+  engine.runTime = 30;
+});
+
+// Boost pick modal: one card of each rarity.
+await page.evaluate(() => {
+  const { engine, useGameStore } = window.__fizzion;
+  engine.setPaused(true);
+  useGameStore.setState({ boostOffer: ['tuner', 'insurance', 'prism'] });
+});
+await page.waitForTimeout(1700); // announce window + arming + stagger-in settle
+await page.screenshot({ path: 'scripts/shot-boosts.png' });
+await page.evaluate(() => {
+  const { engine, useGameStore } = window.__fizzion;
+  useGameStore.setState({ boostOffer: null });
+  engine.setPaused(false);
+});
+
 // Collapse the portal -> Second Chance offer. The fresh profile has the FTUE
 // color ramp active, whose learner grace blocks expiry drain at 0 deliveries —
 // credit one so the forced expiry actually collapses the run.

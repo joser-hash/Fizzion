@@ -1,6 +1,7 @@
 import { CONFIG, GAME_COLORS, type GameColor } from '../constants';
 import { haptics } from '../haptics';
 import { upgradeEffects } from '../upgrades';
+import { applyBoost, resetRunMods, rollBoostOptions, runMods } from '../boosts';
 import { clamp, dist, lerp } from './utils';
 import { audio } from './audio';
 import { Effects } from './effects';
@@ -67,6 +68,10 @@ export interface HudSnapshot {
   /** Current portal request (request coach teaches each label once). */
   requestType: RequestType;
   requestMinMass: number;
+  /** A bonus portal is on screen (the bonus coach explains the first ever). */
+  bonusActive: boolean;
+  /** Bonus deliveries this run (the coach retires its line on the first). */
+  bonusDeliveries: number;
 }
 
 export interface EngineCallbacks {
@@ -79,6 +84,8 @@ export interface EngineCallbacks {
    */
   onCollapse(stats: RoundStats): void;
   onChainBreak(): void;
+  /** A boost pick is due: the engine is paused until applyBoost() is called. */
+  onBoostOffer(options: string[]): void;
 }
 
 /**
@@ -111,6 +118,11 @@ class Engine {
   private orb: Orb = createOrb(0, 0);
   private particles: FoodParticle[] = [];
   private portal: Portal = createPortal();
+  /** Bonus portal: pure opportunity — extra Sparks, no drain when missed. */
+  private bonusPortal: Portal | null = null;
+  /** Seconds until the next bonus spawn (ticks only while none is up). */
+  private bonusCountdown = 0;
+  private bonusDeliveries = 0;
   private hazards: Hazard[] = [];
   /** Seconds until the next raid; only ticks while no hazards are active. */
   private hazardCooldown = 0;
@@ -127,6 +139,13 @@ class Engine {
   private deliveriesSinceRelocate = 0;
   /** FTUE color ramp: colors unlock with deliveries until completed once. */
   private colorRampActive = false;
+
+  // In-run boosts: picked ids, and the countdown to the next offer freeze
+  // (<0 = idle) so the delivery celebration finishes before the modal.
+  private ownedBoosts: string[] = [];
+  private boostOfferDelay = -1;
+  /** Delivery count when the last offer fired (paces relocation offers). */
+  private lastBoostOfferAt = -999;
   private overloads = 0;
   private runTime = 0;
   private stability = 1;
@@ -142,6 +161,11 @@ class Engine {
     chain: number;
     tier: number;
     intensity: number;
+    /** Where the celebration fires (main or bonus portal). */
+    x: number;
+    y: number;
+    color: GameColor;
+    bonus: boolean;
   } | null = null;
   private time = 0;
   private lastFrame = 0;
@@ -170,7 +194,10 @@ class Engine {
     this.input.attach(
       canvas,
       (dx, dy) => {
-        if (this.phase === 'playing' && !this.paused) applyImpulse(this.orb, dx, dy);
+        if (this.phase === 'playing' && !this.paused) {
+          // Featherweight boost scales the swipe before physics sees it.
+          applyImpulse(this.orb, dx * runMods.impulseMult, dy * runMods.impulseMult);
+        }
       },
       () => audio.unlock(),
     );
@@ -264,13 +291,25 @@ class Engine {
 
   startRound(opts?: { colorRamp?: boolean }): void {
     this.colorRampActive = opts?.colorRamp ?? false;
+    resetRunMods();
+    this.ownedBoosts = [];
+    this.boostOfferDelay = -1;
+    this.lastBoostOfferAt = -999;
     this.orb = createOrb(this.w / 2, this.h / 2);
     this.particles = [];
     this.hazards = [];
     this.hazardCooldown = 0; // first raid lands right at the ramp gate
+    this.bonusPortal = null;
+    this.bonusCountdown = this.rollBonusInterval();
+    this.bonusDeliveries = 0;
     this.effects.clear();
     this.portal = createPortal();
     layoutPortal(this.portal, this.w, this.h);
+    // Warm Start: the opening request is stretched too (deliveries === 0).
+    if (upgradeEffects.warmStartBonus > 0) {
+      this.portal.duration += upgradeEffects.warmStartBonus;
+      this.portal.timeLeft = this.portal.duration;
+    }
     // Learner stage 1: the portal's first request comes from the reduced
     // starting palette (createPortal picks from all four).
     if (this.colorRampActive) {
@@ -312,6 +351,25 @@ class Engine {
   setPaused(p: boolean): void {
     this.paused = p;
     this.lastFrame = performance.now();
+  }
+
+  /** Player picked a boost: apply it and resume the frozen run. */
+  applyBoost(id: string): void {
+    if (this.ownedBoosts.includes(id)) return;
+    this.ownedBoosts.push(id);
+    applyBoost(id);
+    audio.chime(1);
+    this.setPaused(false);
+    this.sync(true);
+  }
+
+  /** Rewarded reroll: fresh rarity-weighted options, still excluding owned. */
+  rerollBoosts(): string[] {
+    return rollBoostOptions(this.ownedBoosts);
+  }
+
+  get boosts(): readonly string[] {
+    return this.ownedBoosts;
   }
 
   /** Rewarded "Stabilize": reset instability to the configured fraction. */
@@ -393,6 +451,7 @@ class Engine {
           orb: this.orb,
           particles: this.particles,
           portal: this.portal,
+          bonusPortal: this.bonusPortal,
           hazards: this.hazards,
           effects: this.effects,
           instability: this.instability,
@@ -424,13 +483,13 @@ class Engine {
       this.hazardCooldown -= dt;
       if (this.hazardCooldown <= 0) {
         for (let i = 0; i < raidSize; i++) {
-          this.hazards.push(spawnHazard(this.orb, this.w, this.h, this.difficulty));
+          const hz = spawnHazard(this.orb, this.w, this.h, this.difficulty);
+          hz.life *= upgradeEffects.hazardLifeMult; // Ward: shorter raids
+          this.hazards.push(hz);
         }
-        this.hazardCooldown = lerp(
-          CONFIG.hazardCooldownMax,
-          CONFIG.hazardCooldownMin,
-          this.difficulty,
-        );
+        this.hazardCooldown =
+          lerp(CONFIG.hazardCooldownMax, CONFIG.hazardCooldownMin, this.difficulty) *
+          upgradeEffects.hazardCooldownMult; // Ward: rarer raids
       }
     }
 
@@ -450,6 +509,11 @@ class Engine {
       if (hit.expired) {
         // Survived the raid: dissipate into shards, a small relief beat.
         this.effects.burst(hz.x, hz.y, '#ff2975', 8, 140);
+        if (runMods.thiefBounty > 0) {
+          this.sparksEarned += runMods.thiefBounty;
+          this.effects.text(hz.x, hz.y, `+${runMods.thiefBounty}`, '#ffd500', 15);
+          this.sync(true);
+        }
         this.hazards.splice(i, 1);
       }
     }
@@ -459,6 +523,28 @@ class Engine {
     updateOrb(this.orb, dt, this.w, this.h, this.effects);
 
     beginAttracts(this.particles, this.orb);
+    // Pressure Valve: once the scatter grace lapses, debris homes in on its
+    // own instead of waiting for the orb to come pick it up. Capacity-aware:
+    // it only refills to a comfortable working mass (counting mass already
+    // in flight), well short of the overload cap, so the player keeps room
+    // to play and deliver — make room and it resumes vacuuming whatever
+    // hasn't expired.
+    if (runMods.scatterAutoCollect) {
+      let inFlight = 0;
+      for (const q of this.particles) if (q.state === 'attract') inFlight++;
+      const fillTo = Math.min(CONFIG.boostValveMaxMass, this.effectiveOverloadMass - 2);
+      let room = fillTo - this.orb.mass - inFlight;
+      for (const q of this.particles) {
+        if (room <= 0) break;
+        if (q.state !== 'idle' || q.expireLife === undefined) continue;
+        if (q.collectDelay !== undefined && q.collectDelay > 0) continue;
+        q.state = 'attract';
+        q.ax = q.x;
+        q.ay = q.y;
+        q.attractT = 0;
+        room -= 1;
+      }
+    }
     const consumed = updateParticles(this.particles, dt, this.orb, this.w, this.h);
     for (const p of consumed) this.consume(p);
 
@@ -483,6 +569,7 @@ class Engine {
     }
     if (expired) this.handlePortalExpiry();
     this.checkPortalContact();
+    this.updateBonusPortal(dt);
     this.updateHazards(dt);
 
     // Top-up food clusters periodically.
@@ -513,6 +600,19 @@ class Engine {
 
     this.effects.update(dt);
 
+    // Boost offer countdown: let the delivery celebration play, then freeze.
+    if (this.boostOfferDelay >= 0) {
+      this.boostOfferDelay -= dt;
+      if (this.boostOfferDelay < 0) {
+        const options = rollBoostOptions(this.ownedBoosts);
+        if (options.length > 0) {
+          this.lastBoostOfferAt = this.deliveries;
+          this.setPaused(true);
+          this.cb?.onBoostOffer(options);
+        }
+      }
+    }
+
     this.runTime += dt;
     this.comboHeat *= Math.pow(0.5, dt / CONFIG.comboHeatHalfLife);
     if (this.comboHeat < 0.05) this.comboHeat = 0;
@@ -520,11 +620,7 @@ class Engine {
     // The chain is a streak: it expires without a fresh delivery.
     if (this.chain > 0) {
       this.chainTimeLeft -= dt;
-      if (this.chainTimeLeft <= 0) {
-        this.chain = 0;
-        this.chainTimeLeft = 0;
-        this.cb?.onChainBreak();
-      }
+      if (this.chainTimeLeft <= 0) this.breakChain();
     }
 
     // Low-stability heartbeat.
@@ -557,7 +653,7 @@ class Engine {
     orb.bounceScale = 1;
 
     orb.pips.push(p.color);
-    while (orb.pips.length > CONFIG.pipCount) orb.pips.shift();
+    while (orb.pips.length > CONFIG.pipCount + runMods.pipBonus) orb.pips.shift();
     const prevColor = orb.color;
     orb.color = majorityColor(orb.pips, prevColor);
 
@@ -578,6 +674,21 @@ class Engine {
 
   private overload(): void {
     const orb = this.orb;
+
+    // Controlled Burn: overloading while touching the portal vents the blast
+    // into it — half the mass scores through the normal delivery path, no
+    // scatter, no stability drain, chain intact.
+    if (runMods.controlledBurn) {
+      const d = dist(orb.x, orb.y, this.portal.x, this.portal.y);
+      if (d < orbRadius(orb) + CONFIG.portalRadius * 1.1) {
+        orb.mass = Math.max(1, Math.round(orb.mass / 2));
+        this.effects.text(orb.x, orb.y - orbRadius(orb) - 26, 'CONTROLLED BURN!', '#ffd500', 15);
+        this.effects.flash('#ffd500', 0.08);
+        this.deliver();
+        return;
+      }
+    }
+
     const x = orb.x;
     const y = orb.y;
     const mass = orb.mass;
@@ -602,11 +713,7 @@ class Engine {
     scatterOverload(this.particles, x, y, mass, weighted);
 
     this.overloads += 1;
-    if (this.chain > 0) {
-      this.chain = 0;
-      this.chainTimeLeft = 0;
-      this.cb?.onChainBreak();
-    }
+    this.breakChain();
 
     // Respawn instantly at the explosion point at mass 1, empty pips.
     const fresh = createOrb(x, y);
@@ -632,7 +739,7 @@ class Engine {
     if (p.requestType === 'pure') {
       // Pure: every pip must be the request color, not just the majority.
       eligible =
-        this.orb.pips.length === CONFIG.pipCount &&
+        this.orb.pips.length === CONFIG.pipCount + runMods.pipBonus &&
         this.orb.pips.every((c) => c === p.color);
     } else {
       const colorMatch = this.orb.pips.length > 0 && this.orb.color === p.color;
@@ -652,6 +759,156 @@ class Engine {
     }
   }
 
+  // ---- bonus portal ------------------------------------------------------
+
+  private rollBonusInterval(): number {
+    return (
+      CONFIG.bonusIntervalMin +
+      Math.random() * (CONFIG.bonusIntervalMax - CONFIG.bonusIntervalMin)
+    );
+  }
+
+  /**
+   * Bonus portals are pure opportunity: past the ramp gate one spawns every
+   * interval, stays open briefly, pays double Sparks on delivery, and fades
+   * without any punishment when missed. They never relocate, never lock,
+   * and don't count as "deliveries" for pacing systems.
+   */
+  private updateBonusPortal(dt: number): void {
+    const bp = this.bonusPortal;
+    if (!bp) {
+      if (this.difficulty < CONFIG.bonusRampStart) return;
+      this.bonusCountdown -= dt;
+      if (this.bonusCountdown <= 0) this.spawnBonusPortal();
+      return;
+    }
+    const expired = updatePortal(bp, dt);
+    if (expired) {
+      // Missed: dissolve quietly — no stability drain, no chain break.
+      this.effects.burst(bp.x, bp.y, '#ffd500', 8, 160);
+      this.bonusPortal = null;
+      this.bonusCountdown = this.rollBonusInterval();
+      this.sync(true);
+      return;
+    }
+    this.checkBonusContact();
+  }
+
+  private spawnBonusPortal(): void {
+    const bp = createPortal();
+    const colors = this.requestableColors();
+    bp.color = colors[Math.floor(Math.random() * colors.length)];
+    bp.nextColor = bp.color;
+    bp.requestType = 'normal';
+    bp.minMass = 0;
+    bp.duration = CONFIG.bonusLifetime;
+    bp.timeLeft = CONFIG.bonusLifetime;
+
+    // Placement: inside wall margins, clear of the main portal and the orb
+    // (same rejection-sampling idea as pickRelocationSpot).
+    let bestX = this.w / 2;
+    let bestY = this.h / 2;
+    let bestScore = -Infinity;
+    for (let i = 0; i < 20; i++) {
+      const x = this.w * (0.15 + Math.random() * 0.7);
+      const y = this.h * (0.14 + Math.random() * 0.62);
+      const dPortal = Math.hypot(x - this.portal.x, y - this.portal.y);
+      const dOrb = Math.hypot(x - this.orb.x, y - this.orb.y);
+      const rank = (dPortal >= 150 ? 2 : 0) + (dOrb >= 160 ? 1 : 0);
+      const score = rank * 1e6 + dPortal + dOrb * 0.5;
+      if (score > bestScore) {
+        bestScore = score;
+        bestX = x;
+        bestY = y;
+      }
+      if (rank === 3 && i >= 3) break;
+    }
+    bp.x = bestX;
+    bp.y = bestY;
+    // Open with the expand half of the reroll animation.
+    bp.rerollLeft = CONFIG.portalRerollMs / 2;
+
+    this.bonusPortal = bp;
+    this.effects.shockwave(bp.x, bp.y, '#ffd500', CONFIG.bonusRadius * 3.2, 4, 0.5);
+    this.effects.burst(bp.x, bp.y, '#ffd500', 10, 220);
+    audio.chime(1);
+    this.sync(true);
+  }
+
+  private checkBonusContact(): void {
+    const bp = this.bonusPortal;
+    if (!bp || bp.rerollLeft > 0) return;
+    const d = dist(this.orb.x, this.orb.y, bp.x, bp.y);
+    const touching = d < orbRadius(this.orb) + CONFIG.bonusRadius * 0.9;
+
+    if (!touching) {
+      if (d > orbRadius(this.orb) + CONFIG.bonusRadius + 14) bp.contact = false;
+      return;
+    }
+    if (bp.contact) return;
+    bp.contact = true;
+
+    const eligible = this.orb.pips.length > 0 && this.orb.color === bp.color;
+    if (eligible) {
+      this.deliverBonus();
+    } else {
+      // Same soft rejection as the main portal: bounce, thud, gray flash.
+      const nx = (this.orb.x - bp.x) / (d || 1);
+      const ny = (this.orb.y - bp.y) / (d || 1);
+      const speed = Math.max(Math.hypot(this.orb.vx, this.orb.vy), 220);
+      this.orb.vx = nx * speed * 0.75;
+      this.orb.vy = ny * speed * 0.75;
+      bp.rejectFlash = 1;
+      audio.thud();
+    }
+  }
+
+  /**
+   * Bonus delivery: chain and stability behave like a normal delivery, but
+   * Sparks are doubled and the pacing counters (deliveries, relocation,
+   * boost offers, FTUE ramp) are untouched — the main portal drives those.
+   */
+  private deliverBonus(): void {
+    const bp = this.bonusPortal;
+    if (!bp) return;
+    this.chain += 1;
+    this.chainTimeLeft = CONFIG.chainWindow + runMods.chainWindowBonus;
+    this.bestChainRound = Math.max(this.bestChainRound, this.chain);
+    const mult = this.chain;
+    const mass = this.orb.mass;
+    const gained = Math.round(mass * CONFIG.scorePerMass * mult);
+    const sparks = Math.ceil(
+      (mass * mult * upgradeEffects.sparksMult * CONFIG.bonusSparksMult) /
+        CONFIG.sparksDivisor,
+    );
+    this.score += gained;
+    this.sparksEarned += sparks;
+    this.bonusDeliveries += 1;
+
+    this.stability = Math.min(
+      1,
+      this.stability +
+        CONFIG.stabilityRestoreDelivery +
+        (mult - 1) * CONFIG.stabilityChainBonus,
+    );
+
+    this.comboHeat += mass;
+    const heat01 = Math.min(1, this.comboHeat / CONFIG.comboHeatFull);
+    const tier = this.deliveryTier(mass);
+    this.pendingDelivery = {
+      gained,
+      sparks,
+      chain: mult,
+      tier,
+      intensity: 1 + heat01 * 0.5,
+      x: bp.x,
+      y: bp.y,
+      color: bp.color,
+      bonus: true,
+    };
+    this.hitStopLeft = CONFIG.deliveryTierHitStop[tier] ?? CONFIG.hitStopMs;
+  }
+
   /** Celebration tier from delivered mass: 0 normal, 1 BIG, 2 HUGE, 3 COLOSSAL. */
   private deliveryTier(mass: number): number {
     const t = CONFIG.deliveryTierMasses;
@@ -662,7 +919,7 @@ class Engine {
 
   private deliver(): void {
     this.chain += 1;
-    this.chainTimeLeft = CONFIG.chainWindow;
+    this.chainTimeLeft = CONFIG.chainWindow + runMods.chainWindowBonus;
     this.bestChainRound = Math.max(this.bestChainRound, this.chain);
     const mult = this.chain;
     const mass = this.orb.mass;
@@ -670,7 +927,7 @@ class Engine {
     const typeMult =
       type === 'rush' ? CONFIG.rushScoreMult : type === 'pure' ? CONFIG.pureScoreMult : 1;
     const gained = Math.round(mass * CONFIG.scorePerMass * mult * typeMult);
-    const sparks = Math.ceil((mass * mult) / CONFIG.sparksDivisor);
+    const sparks = Math.ceil((mass * mult * upgradeEffects.sparksMult) / CONFIG.sparksDivisor);
     this.score += gained;
     this.sparksEarned += sparks;
     this.deliveries += 1;
@@ -690,7 +947,17 @@ class Engine {
 
     const tier = this.deliveryTier(mass);
     // Hit-stop first (longer for bigger orbs); celebration fires when it elapses.
-    this.pendingDelivery = { gained, sparks, chain: mult, tier, intensity: 1 + heat01 * 0.5 };
+    this.pendingDelivery = {
+      gained,
+      sparks,
+      chain: mult,
+      tier,
+      intensity: 1 + heat01 * 0.5,
+      x: this.portal.x,
+      y: this.portal.y,
+      color: this.portal.color,
+      bonus: false,
+    };
     this.hitStopLeft = CONFIG.deliveryTierHitStop[tier] ?? CONFIG.hitStopMs;
   }
 
@@ -700,7 +967,8 @@ class Engine {
     this.pendingDelivery = null;
     const p = this.portal;
     const orb = this.orb;
-    const { tier, intensity } = pd;
+    const { tier, intensity, x, y, color } = pd;
+    const radius = pd.bonus ? CONFIG.bonusRadius : CONFIG.portalRadius;
 
     audio.chime(pd.chain, tier);
     haptics.success(tier);
@@ -709,33 +977,44 @@ class Engine {
       CONFIG.shakeSmall * shakeScale * intensity,
       CONFIG.shakeSmallMs + tier * 60,
     );
-    this.effects.jet(orb.x, orb.y, p.x, p.y, orb.color, Math.round(26 * (1 + tier * 0.5) * intensity));
+    this.effects.jet(orb.x, orb.y, x, y, orb.color, Math.round(26 * (1 + tier * 0.5) * intensity));
 
     // Concentric shockwaves: more, bigger rings for bigger orbs.
     const rings = 1 + Math.min(tier, 2) + (tier >= 3 ? 1 : 0);
     for (let i = 0; i < rings; i++) {
       this.effects.shockwave(
-        p.x,
-        p.y,
-        i % 2 === 0 ? p.color : '#ffffff',
-        CONFIG.portalRadius * (3.2 + i * 1.4) * intensity,
+        x,
+        y,
+        i % 2 === 0 ? color : '#ffffff',
+        radius * (3.2 + i * 1.4) * intensity,
         5 - i,
         0.5 + i * 0.12,
       );
     }
 
     const labels = ['', 'BIG!', 'HUGE!', 'COLOSSAL!'];
-    const textY = p.y + CONFIG.portalRadius + 34;
+    const textY = y + radius + 34;
     if (tier > 0) {
-      this.effects.text(p.x, textY + 26 + tier * 4, labels[tier], p.color, 16 + tier * 5);
+      this.effects.text(x, textY + 26 + tier * 4, labels[tier], color, 16 + tier * 5);
     }
-    this.effects.text(p.x, textY, `+${pd.gained}`, p.color, 24 + tier * 6);
-    if (tier >= 3) this.effects.flash(p.color, 0.08);
-    p.successFlash = 1;
+    this.effects.text(x, textY, `+${pd.gained}`, color, 24 + tier * 6);
+    if (tier >= 3) this.effects.flash(color, 0.08);
 
     // Orb consumed -> respawn at center, mass 1, empty pips.
     const fresh = createOrb(this.w / 2, this.h / 2);
     this.orb = fresh;
+
+    if (pd.bonus) {
+      // Bonus banked: golden flourish + the doubled Sparks called out, then
+      // the ring closes. None of the main-portal aftermath applies.
+      this.effects.text(x, textY - 26 - radius, `BONUS +${pd.sparks} SPARKS`, '#ffd500', 15);
+      this.effects.shockwave(x, y, '#ffd500', radius * 4, 4, 0.55);
+      this.bonusPortal = null;
+      this.bonusCountdown = this.rollBonusInterval();
+      this.sync(true);
+      return;
+    }
+    p.successFlash = 1;
 
     // Relocation: earned by deliveries, gated so the learning window keeps
     // a stable target; cadence tightens with difficulty. Expiry rerolls
@@ -745,6 +1024,7 @@ class Engine {
       CONFIG.relocateEveryMax +
         (CONFIG.relocateEveryMin - CONFIG.relocateEveryMax) * this.difficulty,
     );
+    let boostDue = this.deliveries === CONFIG.boostFirstAt;
     if (
       this.runTime >= CONFIG.relocateMinTime &&
       this.deliveries >= CONFIG.relocateMinDeliveries &&
@@ -752,6 +1032,16 @@ class Engine {
     ) {
       this.deliveriesSinceRelocate = 0;
       pickRelocationSpot(p, this.w, this.h, fresh.x, fresh.y);
+      // Later picks ride the relocation chapter break (the >= gate keeps
+      // them disabled whenever boostFirstAt is set out of reach). A jump
+      // landing too soon after the last offer still moves the portal but
+      // defers its card offer to a later relocation.
+      boostDue ||=
+        this.deliveries >= CONFIG.boostFirstAt &&
+        this.deliveries - this.lastBoostOfferAt >= CONFIG.boostMinGapDeliveries;
+    }
+    if (boostDue && this.boostOfferDelay < 0) {
+      this.boostOfferDelay = CONFIG.boostOfferDelayMs / 1000;
     }
 
     // FTUE ramp: a delivery milestone brings a new color into play — make
@@ -778,7 +1068,7 @@ class Engine {
       }
     }
 
-    rerollPortal(p, this.difficulty, this.requestableColors());
+    this.rerollRequest();
     this.sync(true);
   }
 
@@ -814,29 +1104,70 @@ class Engine {
 
     // Wasted match: expiring while the orb currently matches breaks the chain.
     const wasted = this.orb.pips.length > 0 && this.orb.color === this.portal.color;
-    if (wasted && this.chain > 0) {
-      this.chain = 0;
-      this.chainTimeLeft = 0;
-      this.cb?.onChainBreak();
-    }
+    if (wasted) this.breakChain();
     this.sync(true);
+    this.rerollRequest();
+  }
+
+  /**
+   * All chain losses funnel through here so run boosts can intervene:
+   * Insurance eats the break outright (one charge), Chain Reactor halves
+   * the chain instead of zeroing it. Only a true reset fires onChainBreak.
+   */
+  private breakChain(): void {
+    if (this.chain <= 0) return;
+    const orb = this.orb;
+    if (runMods.chainShields > 0) {
+      runMods.chainShields -= 1;
+      this.chainTimeLeft = CONFIG.chainWindow + runMods.chainWindowBonus;
+      this.effects.text(orb.x, orb.y - orbRadius(orb) - 26, 'INSURED!', '#ffd500', 15);
+      return;
+    }
+    if (runMods.chainReactor) {
+      this.chain = Math.floor(this.chain / 2);
+      if (this.chain > 0) {
+        this.chainTimeLeft = CONFIG.chainWindow + runMods.chainWindowBonus;
+        this.effects.text(orb.x, orb.y - orbRadius(orb) - 26, `CHAIN x${this.chain}`, '#ff2975', 14);
+        return;
+      }
+    }
+    this.chain = 0;
+    this.chainTimeLeft = 0;
+    this.cb?.onChainBreak();
+  }
+
+  /** Fresh portal request, stretched by the Tuner boost and — before the
+   *  3rd delivery — the Warm Start upgrade (they stack). */
+  private rerollRequest(): void {
     rerollPortal(this.portal, this.difficulty, this.requestableColors());
+    const bonus =
+      runMods.requestTimeBonus +
+      (this.deliveries < 3 ? upgradeEffects.warmStartBonus : 0);
+    if (bonus > 0) {
+      this.portal.duration += bonus;
+      this.portal.timeLeft = this.portal.duration;
+    }
   }
 
   /** Rewarded "Second Chance": resume the collapsed run once per run. */
   revive(): void {
     if (this.phase !== 'ended' || this.reviveUsed) return;
     this.reviveUsed = true;
-    this.stability = CONFIG.reviveStability;
+    this.stability = Math.min(
+      1,
+      CONFIG.reviveStability + upgradeEffects.reviveStabilityBonus,
+    );
     this.comboHeat = 0;
     this.chain = 0;
     this.chainTimeLeft = 0;
     // Fresh request, full window, and a fresh position — a real new start.
     this.hazards = [];
     this.hazardCooldown = CONFIG.hazardCooldownMin; // post-revive breathing room
+    this.bonusPortal = null;
+    this.bonusCountdown = this.rollBonusInterval();
     this.deliveriesSinceRelocate = 0;
     pickRelocationSpot(this.portal, this.w, this.h, this.orb.x, this.orb.y);
-    rerollPortal(this.portal, this.difficulty, this.requestableColors());
+    this.rerollRequest();
     this.effects.flash('#00ff88', 0.12);
     this.effects.shockwave(this.portal.x, this.portal.y, '#00ff88', CONFIG.portalRadius * 3, 5);
     audio.chime(1);
@@ -898,6 +1229,8 @@ class Engine {
       overloads: this.overloads,
       requestType: this.portal.requestType,
       requestMinMass: this.portal.minMass,
+      bonusActive: this.bonusPortal !== null,
+      bonusDeliveries: this.bonusDeliveries,
     });
   }
 }

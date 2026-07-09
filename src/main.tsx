@@ -27,16 +27,28 @@ if (import.meta.env.DEV) {
     import('./lib/constants'),
     import('./lib/upgrades'),
     import('./audio/useGameMusic'),
-  ]).then(([{ engine }, { useGameStore }, { CONFIG, GAME_COLORS }, { upgradeEffects }, music]) => {
-    (window as unknown as Record<string, unknown>).__fizzion = {
-      engine,
-      useGameStore,
-      CONFIG,
-      GAME_COLORS,
-      upgradeEffects,
+    import('./lib/boosts'),
+  ]).then(
+    ([
+      { engine },
+      { useGameStore },
+      { CONFIG, GAME_COLORS, UPGRADE_CATALOG },
+      { upgradeEffects },
       music,
-    };
-  });
+      boosts,
+    ]) => {
+      (window as unknown as Record<string, unknown>).__fizzion = {
+        engine,
+        useGameStore,
+        CONFIG,
+        GAME_COLORS,
+        UPGRADE_CATALOG,
+        upgradeEffects,
+        music,
+        boosts,
+      };
+    },
+  );
 }
 
 createRoot(document.getElementById('root')!).render(

@@ -1,6 +1,11 @@
 import { IAP_CATALOG, type IapProduct } from './constants';
 
-export type RewardedPlacement = 'stabilize' | 'color_lock' | 'double_down' | 'second_wind';
+export type RewardedPlacement =
+  | 'stabilize'
+  | 'color_lock'
+  | 'double_down'
+  | 'second_wind'
+  | 'boost_reroll';
 export type RewardedResult = 'completed' | 'skipped';
 
 /**

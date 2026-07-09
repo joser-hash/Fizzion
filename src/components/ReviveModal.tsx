@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { engine } from '../lib/engine/engine';
 import { CONFIG } from '../lib/constants';
+import { upgradeEffects } from '../lib/upgrades';
 import { useAdService } from '../hooks/useAdService';
 import { useGameStore } from '../store/gameStore';
 
@@ -100,7 +101,11 @@ export function ReviveModal() {
           &#9654; SECOND CHANCE
         </motion.button>
         <div className="text-xs uppercase tracking-wider text-white/40">
-          Watch an ad — portal restored to 50%
+          Watch an ad — portal restored to{' '}
+          {Math.round(
+            Math.min(1, CONFIG.reviveStability + upgradeEffects.reviveStabilityBonus) * 100,
+          )}
+          %
         </div>
         <button
           className="mt-2 text-xs uppercase tracking-wider text-white/30 underline"

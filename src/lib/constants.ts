@@ -27,28 +27,63 @@ export const UPGRADE_CATALOG: readonly UpgradeDef[] = [
     name: 'Reinforced Portal',
     desc: '-12% stability damage from missed requests, per level',
     maxLevel: 3,
-    costs: [200, 500, 1200],
+    costs: [200, 1500, 6000],
   },
   {
     id: 'magnet_core',
     name: 'Magnet Core',
     desc: '+12% particle collect range, per level',
     maxLevel: 3,
-    costs: [150, 400, 1000],
+    costs: [150, 1200, 5000],
   },
   {
     id: 'dense_shell',
     name: 'Dense Shell',
     desc: '+1 overload threshold, per level',
     maxLevel: 3,
-    costs: [250, 600, 1400],
+    costs: [250, 1800, 7000],
   },
   {
     id: 'lock_battery',
     name: 'Lock Battery',
     desc: 'Start every run with a Color Lock charge',
     maxLevel: 1,
-    costs: [800],
+    costs: [1500],
+  },
+  {
+    id: 'prospector',
+    name: 'Prospector',
+    desc: '+10% Sparks earned, per level',
+    maxLevel: 3,
+    costs: [300, 2000, 8000],
+  },
+  {
+    id: 'ward',
+    name: 'Ward',
+    desc: 'Pip thief raids are 20% shorter and rarer, per level',
+    maxLevel: 2,
+    costs: [400, 2500],
+  },
+  {
+    id: 'second_chance_plus',
+    name: 'Second Chance+',
+    desc: 'Revives restore +15% more stability, per level',
+    maxLevel: 2,
+    costs: [500, 3000],
+  },
+  {
+    id: 'sticky_drops',
+    name: 'Sticky Drops',
+    desc: 'Overload debris lasts +0.5s before fading, per level',
+    maxLevel: 3,
+    costs: [250, 1500, 5000],
+  },
+  {
+    id: 'warm_start',
+    name: 'Warm Start',
+    desc: '+2s on request timers until your 3rd delivery',
+    maxLevel: 1,
+    costs: [1200],
   },
 ] as const;
 
@@ -151,6 +186,19 @@ export const CONFIG = {
   clusterRadius: 70,
   particleRadius: 5,
 
+  // --- In-run boosts (roguelite picks) ---
+  /** Deliveries until the first boost offer; later offers fuse with portal
+   *  relocation. Setting this very high disables offers entirely (tests). */
+  boostFirstAt: 3,
+  /** Pause between the delivery celebration and the boost offer freeze. */
+  boostOfferDelayMs: 700,
+  /** Deliveries that must pass between offers: a relocation falling inside
+   *  this window still jumps the portal but defers its card offer. */
+  boostMinGapDeliveries: 4,
+  /** Pressure Valve stops pulling debris at this orb mass (incl. in-flight):
+   *  well below the overload cap, so the player keeps room to play. */
+  boostValveMaxMass: 12,
+
   // --- FTUE color ramp ---
   /** Learner runs start with 2 colors (so pips/matching are demonstrable);
    *  these delivery counts unlock the 3rd and 4th. Active until completed
@@ -170,6 +218,19 @@ export const CONFIG = {
   portalRadius: 44,
   /** Reroll collapse/expand animation (ms). */
   portalRerollMs: 450,
+
+  // --- Bonus portal (pure opportunity: extra Sparks, no drain if missed) ---
+  /** Ramp fraction where bonus portals start appearing (~45s at default ramp).
+   *  Setting this above 1 disables them entirely (tests). */
+  bonusRampStart: 0.25,
+  /** Seconds between bonus spawns (uniform roll in [min, max]). */
+  bonusIntervalMin: 40,
+  bonusIntervalMax: 60,
+  /** Seconds a bonus portal stays open. */
+  bonusLifetime: 10,
+  bonusRadius: 30,
+  /** Sparks multiplier on bonus deliveries (stacks with Prospector). */
+  bonusSparksMult: 2,
 
   // --- Portal relocation ---
   /** Run seconds AND total deliveries both required before the first move. */

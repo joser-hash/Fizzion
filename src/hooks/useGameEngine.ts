@@ -20,6 +20,7 @@ export function useGameEngine(
       onSync: (snap) => useGameStore.getState().syncFromEngine(snap),
       onRoundEnd: (stats) => useGameStore.getState().finishRound(stats),
       onCollapse: (stats) => useGameStore.getState().offerRevive(stats),
+      onBoostOffer: (options) => useGameStore.getState().offerBoosts(options),
       onChainBreak,
     });
 

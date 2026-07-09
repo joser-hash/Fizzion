@@ -153,13 +153,6 @@ export function ResultsScreen() {
           </div>
         </motion.div>
 
-        <motion.div
-          {...item(3)}
-          className="flex items-center gap-1.5 text-sm text-[#ffd500]/80"
-        >
-          <SparkIcon size={14} /> Wallet: {sparks}
-        </motion.div>
-
         <motion.div {...item(4)} className="flex flex-col items-center gap-3">
           {!lastRound.doubled && lastRound.sparksEarned > 0 && (
             <button
@@ -171,10 +164,15 @@ export function ResultsScreen() {
           )}
           {colorLockCharges === 0 && (
             <button
-              className="rounded-full border border-[#00cfff]/50 px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-[#00cfff]/90 shadow-[0_0_14px_rgba(0,207,255,0.25)]"
+              className="flex flex-col items-center rounded-full border border-[#00cfff]/50 px-6 py-2.5 text-center shadow-[0_0_14px_rgba(0,207,255,0.25)] active:scale-95"
               onClick={onColorLock}
             >
-              &#9654; Color Lock — free 5s freeze next round
+              <span className="text-xs font-bold uppercase tracking-wider text-[#00cfff]/90">
+                &#9654; Color Lock
+              </span>
+              <span className="text-[10px] font-bold uppercase tracking-wide text-[#00cfff]/65">
+                Free 5s freeze next round
+              </span>
             </button>
           )}
         </motion.div>
@@ -215,6 +213,13 @@ export function ResultsScreen() {
         >
           <SparkIcon size={14} /> Shop
         </motion.button>
+
+        <motion.div
+          {...item(6)}
+          className="flex items-center gap-1.5 text-sm text-[#ffd500]/80"
+        >
+          <SparkIcon size={14} /> Wallet: {sparks}
+        </motion.div>
       </div>
 
       <ShopModal open={shopOpen} onClose={() => setShopOpen(false)} />

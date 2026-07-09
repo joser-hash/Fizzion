@@ -7,6 +7,7 @@ import { FtueCoach, RequestCoach } from './components/FtueCoach';
 import { StartScreen } from './components/StartScreen';
 import { ResultsScreen } from './components/ResultsScreen';
 import { ReviveModal } from './components/ReviveModal';
+import { BoostPickModal } from './components/BoostPickModal';
 import { AdModal } from './components/AdModal';
 import { RotateOverlay } from './components/RotateOverlay';
 import { DebugPanel } from './components/DebugPanel';
@@ -17,6 +18,7 @@ export default function App() {
   usePersistence();
   const phase = useGameStore((s) => s.phase);
   const musicOn = useGameStore((s) => s.music);
+  const boostOffer = useGameStore((s) => s.boostOffer);
 
   // Ambience starts with the title screen (respecting the persisted music
   // setting) and follows the settings toggle from then on. If autoplay is
@@ -37,6 +39,7 @@ export default function App() {
         {phase === 'menu' && <StartScreen key="start" />}
         {phase === 'revive' && <ReviveModal key="revive" />}
         {phase === 'results' && <ResultsScreen key="results" />}
+        {phase === 'playing' && boostOffer && <BoostPickModal key="boosts" />}
       </AnimatePresence>
       <AdModal />
       <DebugPanel />

@@ -8,6 +8,7 @@ const PLACEMENT_LABELS: Record<string, string> = {
   color_lock: 'Color Lock',
   double_down: 'Double Down',
   second_wind: 'Second Chance',
+  boost_reroll: 'Boost Reroll',
 };
 
 /** Full-screen mock ad: 3s countdown, then a close (or skip) control. */

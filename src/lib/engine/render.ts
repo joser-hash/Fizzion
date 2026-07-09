@@ -1,4 +1,5 @@
 import { CONFIG } from '../constants';
+import { runMods } from '../boosts';
 import { clamp, TAU } from './utils';
 import type { Orb } from './orb';
 import { orbRadius } from './orb';
@@ -12,6 +13,8 @@ export interface Scene {
   orb: Orb;
   particles: FoodParticle[];
   portal: Portal;
+  /** Bonus portal currently open, or null. */
+  bonusPortal: Portal | null;
   hazards: Hazard[];
   effects: Effects;
   /** Instability 0..1 (drawn as an arc around the orb). */
@@ -190,6 +193,7 @@ export class Renderer {
     this.drawParticles(ctx, s);
     if (s.ftueGuide && s.playing) this.drawFtueGuide(ctx, s);
     this.drawPortal(ctx, s);
+    if (s.bonusPortal) this.drawBonusPortal(ctx, s.bonusPortal, s.time);
     for (const hz of s.hazards) this.drawHazard(ctx, hz, s.time);
     this.drawDrag(ctx, s);
     this.drawOrb(ctx, s);
@@ -346,13 +350,23 @@ export class Renderer {
    * ready, go there" with zero reading required.
    */
   private drawFtueGuide(ctx: CanvasRenderingContext2D, s: Scene): void {
-    const { orb, portal } = s;
-    if (orb.pips.length === 0 || orb.color !== portal.color || portal.rerollLeft > 0) return;
+    const { orb } = s;
+    if (orb.pips.length === 0) return;
+    // Lead to the main portal when it matches; otherwise to a matching
+    // bonus portal (so the guide never points at an ineligible ring).
+    let portal = s.portal;
+    let radius = CONFIG.portalRadius;
+    if (orb.color !== portal.color || portal.rerollLeft > 0) {
+      const bp = s.bonusPortal;
+      if (!bp || orb.color !== bp.color || bp.rerollLeft > 0) return;
+      portal = bp;
+      radius = CONFIG.bonusRadius;
+    }
     const dx = portal.x - orb.x;
     const dy = portal.y - orb.y;
     const dist = Math.hypot(dx, dy);
     const start = orbRadius(orb) + 24;
-    const end = dist - CONFIG.portalRadius - 20;
+    const end = dist - radius - 20;
     if (end <= start) return;
     const nx = dx / dist;
     const ny = dy / dist;
@@ -492,6 +506,60 @@ export class Renderer {
   }
 
   /**
+   * Bonus portal: a smaller ring in the request color wrapped in a golden
+   * outer ring — reads as "same job, special prize". No decay/lock states;
+   * it only ever counts down.
+   */
+  private drawBonusPortal(ctx: CanvasRenderingContext2D, p: Portal, time: number): void {
+    const gold = '#ffd500';
+    const scale = portalScale(p);
+    if (scale <= 0.02) return;
+    const r = Math.max(0.5, CONFIG.bonusRadius * scale * (1 + 0.04 * Math.sin(time * 2.2)));
+
+    let alpha = 0.95;
+    if (p.timeLeft < CONFIG.portalUrgencyTime && p.rerollLeft <= 0) {
+      const urgency = 1 - p.timeLeft / CONFIG.portalUrgencyTime;
+      const hz = 4 + urgency * 10;
+      alpha *= 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(time * hz * TAU));
+    }
+
+    // Inner ring asks the color; golden outer ring promises the prize.
+    this.ring(ctx, p.x, p.y, r, p.color, 2.6, alpha);
+    this.ring(ctx, p.x, p.y, r + 9, gold, 1.6, alpha * 0.85);
+
+    // Shrinking golden arc = time left.
+    const frac = clamp(p.timeLeft / p.duration, 0, 1);
+    if (frac > 0 && scale > 0.9) {
+      const start = -Math.PI / 2;
+      this.ring(ctx, p.x, p.y, r + 16, gold, 1.4, 0.8, start, start + TAU * frac);
+    }
+
+    // Orbiting golden sparkles.
+    const sparkles = this.q === 0 ? 4 : 2;
+    for (let i = 0; i < sparkles; i++) {
+      const a = p.rotation * 2 + (i * TAU) / sparkles;
+      const sx = p.x + Math.cos(a) * (r + 13);
+      const sy = p.y + Math.sin(a) * (r + 13);
+      const tw = 0.5 + 0.5 * Math.sin(time * 6 + i * 2.1);
+      this.glow(ctx, sx, sy, 1.4 + tw, gold, 0.5 + 0.5 * tw);
+    }
+
+    // "BONUS" tag under the ring.
+    if (scale > 0.85) {
+      ctx.globalAlpha = alpha * (0.75 + 0.25 * Math.sin(time * 3));
+      ctx.fillStyle = gold;
+      ctx.font = `800 11px 'Oxanium', ui-sans-serif, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('B O N U S', p.x, p.y + r + 24);
+      ctx.globalAlpha = 1;
+    }
+
+    if (p.rejectFlash > 0) {
+      this.ring(ctx, p.x, p.y, r + 4, '#9a9a9a', 3, p.rejectFlash);
+    }
+  }
+
+  /**
    * The pip thief: a jittering, irregular red ring with a dim core and
    * orbiting shards — deliberately "wrong" against the clean neon dots.
    */
@@ -607,7 +675,8 @@ export class Renderer {
     // Orbiting pips (last 3 colors eaten).
     const pipR = Math.max(3.4, r * 0.16);
     for (let i = 0; i < orb.pips.length; i++) {
-      const a = s.time * 2.4 + (i * TAU) / CONFIG.pipCount;
+      // Prism boost widens the ring to 4 slots; spacing tracks it live.
+      const a = s.time * 2.4 + (i * TAU) / (CONFIG.pipCount + runMods.pipBonus);
       const px = x + Math.cos(a) * (hr + pipR + 6);
       const py = y + Math.sin(a) * (hr + pipR + 6);
       this.glow(ctx, px, py, pipR, orb.pips[i]);
