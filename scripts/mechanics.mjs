@@ -756,7 +756,7 @@ check(
   JSON.stringify(shop),
 );
 
-// Purchase must survive a reload (v2 save schema).
+// Purchase must survive a reload (versioned save schema).
 await page.waitForTimeout(1200); // debounced save
 await page.reload();
 await page.waitForFunction(() => window.__fizzion, null, { timeout: 10000 });
@@ -772,8 +772,8 @@ const persisted = await page.evaluate(() => {
   };
 });
 check(
-  'purchase survives reload with v4 save',
-  persisted.version === 4 &&
+  'purchase survives reload with v5 save',
+  persisted.version === 5 &&
     persisted.level === 1 &&
     Math.abs(persisted.mult - 0.88) < 1e-9 &&
     persisted.sparks === 800,
@@ -1745,6 +1745,116 @@ check(
     bonusDeliveries: bonusDeliver.bonusDeliveries,
     taught: bonusDeliver.taughtByUse,
   }),
+);
+
+// --- Upgrade trial: +1 level for one run, reverted at round end ---
+const trial = await page.evaluate(() => {
+  const { useGameStore, upgradeEffects } = window.__fizzion;
+  const store = useGameStore.getState();
+  useGameStore.setState({ upgrades: { magnet_core: 1, warm_start: 1 } });
+  // Maxed upgrades can't be trialed (warm_start maxLevel is 1).
+  store.armTrialUpgrade('warm_start');
+  const maxedRefused = useGameStore.getState().trialUpgrade === null;
+  store.armTrialUpgrade('magnet_core');
+  const armed = useGameStore.getState().trialUpgrade;
+  store.beginRound();
+  const during = upgradeEffects.collectRangeMult; // level 1 + trial = 1.24
+  const cleared = useGameStore.getState().trialUpgrade === null;
+  useGameStore.getState().finishRound({
+    score: 0, bestChain: 0, sparksEarned: 0, deliveries: 0, overloads: 0, duration: 0,
+  });
+  const after = upgradeEffects.collectRangeMult; // owned level only = 1.12
+  return { maxedRefused, armed, during, cleared, after };
+});
+check(
+  'trial plays one run at +1 level then reverts (maxed upgrades refused)',
+  trial.maxedRefused &&
+    trial.armed === 'magnet_core' &&
+    Math.abs(trial.during - 1.24) < 0.001 &&
+    trial.cleared &&
+    Math.abs(trial.after - 1.12) < 0.001,
+  JSON.stringify(trial),
+);
+
+// --- Head Start: buying arms it; the run opens with a boost offer ---
+const headStart = await page.evaluate(async () => {
+  const { engine, CONFIG, useGameStore } = window.__fizzion;
+  CONFIG.boostFirstAt = 3;
+  CONFIG.boostOfferDelayMs = 50;
+  CONFIG.maxParticles = 0;
+  CONFIG.hazardMaxCount = 0;
+  CONFIG.bonusRampStart = 9;
+  // Store side: buying deducts Sparks and arms; beginRound consumes the flag.
+  useGameStore.setState({ sparks: 200, headStartArmed: false });
+  useGameStore.getState().buyHeadStart();
+  const bought = {
+    sparks: useGameStore.getState().sparks,
+    armed: useGameStore.getState().headStartArmed,
+  };
+  useGameStore.getState().beginRound();
+  const consumed = useGameStore.getState().headStartArmed === false;
+  engine.startRound({ headStart: true });
+  engine.particles.length = 0;
+  await new Promise((r) => setTimeout(r, 1800)); // 1.2s prime + roll margin
+  const s = useGameStore.getState();
+  const offered = Array.isArray(s.boostOffer) && s.boostOffer.length === 3;
+  const paused = engine.paused;
+  const stamped = engine.lastBoostOfferAt === 0;
+  if (offered) useGameStore.getState().chooseBoost(s.boostOffer[0]);
+  await new Promise((r) => setTimeout(r, 100));
+
+  // Min-gap guard: the natural boostFirstAt=3 offer lands inside the gap
+  // after a head start (3 - 0 < boostMinGapDeliveries) and must stay quiet.
+  const c = '#00ff88';
+  const forceDeliver = async () => {
+    engine.orb.x = 60;
+    engine.orb.y = 760;
+    await new Promise((r) => setTimeout(r, 300)); // clear portal contact
+    const p = engine.portal;
+    p.contact = false;
+    p.requestType = 'normal';
+    p.color = c;
+    p.minMass = 0;
+    p.timeLeft = 30;
+    p.duration = 30;
+    p.rerollLeft = 0;
+    engine.orb.pips = [c];
+    engine.orb.color = c;
+    engine.orb.mass = 2;
+    engine.orb.x = p.x;
+    engine.orb.y = p.y;
+    await new Promise((r) => setTimeout(r, 700)); // hit-stop + celebration
+  };
+  await forceDeliver();
+  await forceDeliver();
+  await forceDeliver();
+  await new Promise((r) => setTimeout(r, 400));
+  const deferred = useGameStore.getState().boostOffer === null && !engine.paused;
+  CONFIG.boostFirstAt = 9999; // stand down
+  return {
+    bought,
+    consumed,
+    offered,
+    paused,
+    stamped,
+    deliveries: engine.deliveries,
+    deferred,
+  };
+});
+check(
+  'head start purchase deducts 150 Sparks and arms the flag',
+  headStart.bought.sparks === 50 && headStart.bought.armed && headStart.consumed,
+  JSON.stringify(headStart.bought),
+);
+check(
+  'head start opens the run with a paused 3-card offer at delivery 0',
+  headStart.offered && headStart.paused && headStart.stamped,
+  JSON.stringify(headStart),
+);
+check(
+  'first natural offer deferred by the min-gap guard after a head start',
+  headStart.deliveries === 3 && headStart.deferred,
+  JSON.stringify(headStart),
 );
 
 check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));

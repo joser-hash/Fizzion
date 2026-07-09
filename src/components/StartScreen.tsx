@@ -11,8 +11,10 @@ export function startRound(): void {
   // User gesture: allowed to create/resume the AudioContext (no-op if the
   // music is already running or disabled in settings).
   if (useGameStore.getState().music) void startMusic();
+  // Read before beginRound clears it: a Head Start opens with a boost pick.
+  const headStart = useGameStore.getState().headStartArmed;
   useGameStore.getState().beginRound();
-  engine.startRound({ colorRamp: !useGameStore.getState().colorRampDone });
+  engine.startRound({ colorRamp: !useGameStore.getState().colorRampDone, headStart });
 }
 
 export function StartScreen() {

@@ -91,9 +91,17 @@ export const IAP_CATALOG: readonly IapProduct[] = [
   { id: 'remove_ads', title: 'Remove Ads', priceUsd: 3.99, type: 'non_consumable' },
   { id: 'sparks_small', title: '500 Sparks', priceUsd: 0.99, type: 'consumable', sparks: 500 },
   { id: 'sparks_medium', title: '3000 Sparks', priceUsd: 4.99, type: 'consumable', sparks: 3000 },
-  { id: 'sparks_large', title: '8000 Sparks', priceUsd: 9.99, type: 'consumable', sparks: 8000 },
+  { id: 'sparks_large', title: '10000 Sparks', priceUsd: 9.99, type: 'consumable', sparks: 10000 },
   { id: 'theme_aurora', title: 'Aurora Theme (coming soon)', priceUsd: 1.99, type: 'cosmetic' },
 ] as const;
+
+// --- Shop monetization hooks ---
+/** Sparks granted per Daily Gift rewarded ad. */
+export const DAILY_GIFT_SPARKS = 75;
+/** Daily Gift claims allowed per (local) calendar day. */
+export const DAILY_GIFT_MAX = 3;
+/** Sparks cost of a Head Start (boost pick at the top of the next run). */
+export const HEAD_START_COST = 150;
 
 /**
  * ALL gameplay tuning values. Mutable at runtime via the debug panel —

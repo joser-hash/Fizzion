@@ -247,6 +247,56 @@ check(
   shopState.sparks === 800 && shopState.level === 1,
   JSON.stringify(shopState),
 );
+
+// Daily Gift: capped rewarded-ad Sparks faucet at the top of the shop.
+check('daily gift card visible', await page.getByText('DAILY GIFT').isVisible());
+check('daily gift shows the full count', await page.getByText('3/3 left today').isVisible());
+await page.getByText('AD +75').click();
+check('daily gift rewarded ad opens', await page.getByText('AD (mock)').isVisible());
+await page.waitForTimeout(3300);
+await page.getByText('CLAIM REWARD').click();
+await page.waitForTimeout(300);
+const gift = await page.evaluate(() => {
+  const s = window.__fizzion.useGameStore.getState();
+  return { sparks: s.sparks, claimed: s.dailyGift.claimed };
+});
+check(
+  'daily gift grants 75 Sparks and counts the claim',
+  gift.sparks === 875 && gift.claimed === 1,
+  JSON.stringify(gift),
+);
+check('daily gift counter decremented', await page.getByText('2/3 left today').isVisible());
+
+// Upgrade trial: a rewarded ad arms +1 level for the next run.
+await page.getByText('TRY (AD)').first().click();
+await page.waitForTimeout(3300);
+await page.getByText('CLAIM REWARD').click();
+await page.waitForTimeout(300);
+const trialId = await page.evaluate(() => window.__fizzion.useGameStore.getState().trialUpgrade);
+check('upgrade trial armed after the ad', trialId === 'reinforced_portal', `trial=${trialId}`);
+check('trial badge shown on the row', await page.getByText('TRIAL — NEXT RUN').isVisible());
+
+// Head Start: a Sparks sink queued for the next run.
+await page.getByLabel('Buy Head Start').click();
+await page.waitForTimeout(300);
+const headStart = await page.evaluate(() => {
+  const s = window.__fizzion.useGameStore.getState();
+  return { sparks: s.sparks, armed: s.headStartArmed };
+});
+check(
+  'head start deducts 150 Sparks and arms for the next run',
+  headStart.sparks === 725 && headStart.armed === true,
+  JSON.stringify(headStart),
+);
+check('head start shows the armed state', await page.getByText('ARMED — NEXT RUN').isVisible());
+check('large pack bumped to 10000 Sparks', await page.getByText('10000 Sparks').isVisible());
+
+// Stand down: no surprise Power Surge or trial in the scripted runs below
+// (the head-start offer flow is covered by mechanics.mjs).
+await page.evaluate(() => {
+  window.__fizzion.useGameStore.setState({ headStartArmed: false, trialUpgrade: null });
+});
+
 await page.getByText('CLOSE').click();
 await page.waitForTimeout(400);
 check(

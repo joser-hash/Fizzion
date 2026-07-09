@@ -1,7 +1,14 @@
 import { create } from 'zustand';
 import { engine, type HudSnapshot, type RoundStats } from '../lib/engine/engine';
 import type { RequestType } from '../lib/engine/portal';
-import { CONFIG, IAP_CATALOG, UPGRADE_CATALOG } from '../lib/constants';
+import {
+  CONFIG,
+  DAILY_GIFT_MAX,
+  DAILY_GIFT_SPARKS,
+  HEAD_START_COST,
+  IAP_CATALOG,
+  UPGRADE_CATALOG,
+} from '../lib/constants';
 import { applyUpgradeLevels } from '../lib/upgrades';
 
 export type GamePhase = 'menu' | 'playing' | 'revive' | 'results';
@@ -26,10 +33,27 @@ export interface PersistedData {
   requestsTaught: { minMass?: boolean; rush?: boolean; pure?: boolean; bonus?: boolean };
   /** FTUE color ramp completed: runs start with the full palette (save v4). */
   colorRampDone: boolean;
+  /** Daily Gift rewarded-ad claims for one local calendar day (save v5). */
+  dailyGift: { date: string; claimed: number };
+  /** A Head Start (boost pick at run start) is queued for the next run (save v5). */
+  headStartArmed: boolean;
+}
+
+/** Local calendar day key for the Daily Gift reset (device timezone). */
+export function todayKey(): string {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/** Daily Gift claims still available today. */
+export function dailyGiftLeft(gift: { date: string; claimed: number }): number {
+  return DAILY_GIFT_MAX - (gift.date === todayKey() ? gift.claimed : 0);
 }
 
 const SAVE_KEY = 'fizzion_save';
-const SAVE_VERSION = 4;
+const SAVE_VERSION = 5;
 
 const DEFAULT_PERSISTED: PersistedData = {
   sparks: 0,
@@ -44,6 +68,8 @@ const DEFAULT_PERSISTED: PersistedData = {
   ftueDone: false,
   requestsTaught: {},
   colorRampDone: false,
+  dailyGift: { date: '', claimed: 0 },
+  headStartArmed: false,
 };
 
 export function loadPersisted(): PersistedData {
@@ -61,6 +87,7 @@ export function loadPersisted(): PersistedData {
         ...parsed.data,
         upgrades: { ...(parsed.data.upgrades ?? {}) },
         requestsTaught: { ...(parsed.data.requestsTaught ?? {}) },
+        dailyGift: { ...DEFAULT_PERSISTED.dailyGift, ...(parsed.data.dailyGift ?? {}) },
       };
       // Migration: players who already learned the game skip the FTUE ramp.
       if (parsed.version < 4 && (data.roundsPlayed > 0 || data.ftueDone)) {
@@ -117,6 +144,8 @@ interface GameStore extends PersistedData {
   boostOffer: string[] | null;
   /** Boosts picked this run (session state — surfaced on the results screen). */
   ownedBoosts: string[];
+  /** Upgrade id armed by an ad trial: acts +1 level for the next run only. */
+  trialUpgrade: string | null;
   lastRound: LastRound | null;
   /** Stats held while the Second Chance (revive) offer is on screen. */
   pendingStats: RoundStats | null;
@@ -167,6 +196,12 @@ interface GameStore extends PersistedData {
   completeFtue(): void;
   /** Mark one portal request label as explained forever. */
   markRequestTaught(kind: 'minMass' | 'rush' | 'pure' | 'bonus'): void;
+  /** Daily Gift ad completed: grant Sparks (up to the daily cap). */
+  claimDailyGift(): void;
+  /** Upgrade trial ad completed: the upgrade acts +1 level next run. */
+  armTrialUpgrade(id: string): void;
+  /** Spend Sparks to queue a boost pick at the top of the next run. */
+  buyHeadStart(): void;
 }
 
 const initialPersisted = loadPersisted();
@@ -193,6 +228,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   colorLockCharges: 0,
   boostOffer: null,
   ownedBoosts: [],
+  trialUpgrade: null,
   lastRound: null,
   pendingStats: null,
   sessionBest: 0,
@@ -228,21 +264,38 @@ export const useGameStore = create<GameStore>((set, get) => ({
     })),
 
   beginRound: () =>
-    set((s) => ({
-      phase: 'playing',
-      lastRound: null,
-      rewardedThisRun: false,
-      boostOffer: null,
-      ownedBoosts: [],
-      // Lock Battery: every run starts with at least one Color Lock charge.
-      colorLockCharges:
-        (s.upgrades['lock_battery'] ?? 0) > 0
-          ? Math.max(s.colorLockCharges, 1)
-          : s.colorLockCharges,
-    })),
+    set((s) => {
+      // Upgrade trial: this run plays with the armed upgrade one level up
+      // (capped at max), then finishRound restores the owned levels.
+      let effective = s.upgrades;
+      if (s.trialUpgrade) {
+        const def = UPGRADE_CATALOG.find((u) => u.id === s.trialUpgrade);
+        const level = s.upgrades[s.trialUpgrade] ?? 0;
+        if (def && level < def.maxLevel) {
+          effective = { ...s.upgrades, [s.trialUpgrade]: level + 1 };
+        }
+      }
+      applyUpgradeLevels(effective);
+      return {
+        phase: 'playing',
+        lastRound: null,
+        rewardedThisRun: false,
+        boostOffer: null,
+        ownedBoosts: [],
+        trialUpgrade: null,
+        headStartArmed: false,
+        // Lock Battery: every run starts with at least one Color Lock charge.
+        colorLockCharges:
+          (effective['lock_battery'] ?? 0) > 0
+            ? Math.max(s.colorLockCharges, 1)
+            : s.colorLockCharges,
+      };
+    }),
 
   finishRound: (stats) => {
     const s = get();
+    // Any trial boost from this run expires with it.
+    applyUpgradeLevels(s.upgrades);
     set({
       phase: 'results',
       pendingStats: null,
@@ -317,7 +370,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (s.sparks < cost) return;
     const upgrades = { ...s.upgrades, [id]: level + 1 };
     applyUpgradeLevels(upgrades);
-    set({ sparks: s.sparks - cost, upgrades });
+    set({
+      sparks: s.sparks - cost,
+      upgrades,
+      // Buying the real level makes an armed trial of it redundant.
+      trialUpgrade: s.trialUpgrade === id ? null : s.trialUpgrade,
+    });
   },
 
   completePurchase: (productId) => {
@@ -334,4 +392,29 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   markRequestTaught: (kind) =>
     set((s) => ({ requestsTaught: { ...s.requestsTaught, [kind]: true } })),
+
+  claimDailyGift: () => {
+    const s = get();
+    if (dailyGiftLeft(s.dailyGift) <= 0) return;
+    const today = todayKey();
+    const claimed = s.dailyGift.date === today ? s.dailyGift.claimed : 0;
+    set({
+      sparks: s.sparks + DAILY_GIFT_SPARKS,
+      dailyGift: { date: today, claimed: claimed + 1 },
+    });
+  },
+
+  armTrialUpgrade: (id) => {
+    const def = UPGRADE_CATALOG.find((u) => u.id === id);
+    if (!def) return;
+    const level = get().upgrades[id] ?? 0;
+    if (level >= def.maxLevel) return;
+    set({ trialUpgrade: id });
+  },
+
+  buyHeadStart: () => {
+    const s = get();
+    if (s.headStartArmed || s.sparks < HEAD_START_COST) return;
+    set({ sparks: s.sparks - HEAD_START_COST, headStartArmed: true });
+  },
 }));

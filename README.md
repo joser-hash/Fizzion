@@ -31,7 +31,8 @@ First run includes a light FTUE: coach lines advance as you steer, eat, and deli
 - Deliveries also earn Sparks (persisted). Spend them in the **Shop** (results screen) on 9 permanent upgrades: Reinforced Portal, Magnet Core, Dense Shell, Lock Battery, Prospector (+10% Sparks/level), Ward (shorter, rarer thief raids), Second Chance+ (stronger revives), Sticky Drops (longer-lived overload debris), and Warm Start (+2s on request timers until your 3rd delivery). Level-1 prices stay cheap for a fast first purchase; later levels climb steeply (~49k Sparks to max everything), so the currency stays meaningful for weeks.
 - Every boost and shop upgrade has a hand-drawn monoline neon icon (`src/components/GameIcons.tsx`), tinted by rarity on boost cards and Sparks-yellow in the shop.
 - When the portal collapses you get one **Second Chance** per run: watch a rewarded ad within 5 s to restore 50% stability and keep going.
-- Mock IAP: Sparks packs and Remove Ads are purchasable from the shop. Remove Ads kills interstitials; a completed rewarded ad also courtesy-skips the next interstitial.
+- The shop is also the rewarded-ad hub: a **Daily Gift** card pays 75 Sparks per ad, up to 3 times per (local) day, and every non-maxed upgrade row offers a **trial** — watch an ad and that upgrade acts one level higher for your next run only (buying the real level cancels a pending trial). A **Head Start** consumable (150 Sparks, the repeatable sink) queues a Power Surge boost pick right at the top of your next run; it defers the usual 3rd-delivery offer via the same min-gap pacing as relocations.
+- Mock IAP: Sparks packs (500 / 3,000 / 10,000) and Remove Ads are purchasable from the shop. Remove Ads kills interstitials; a completed rewarded ad also courtesy-skips the next interstitial.
 - Settings (gear button on the menu and results screens): SFX and haptics toggles, app version, privacy policy link, and a two-tap "reset game data" that wipes the save.
 
 ## Tech

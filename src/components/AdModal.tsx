@@ -9,6 +9,8 @@ const PLACEMENT_LABELS: Record<string, string> = {
   double_down: 'Double Down',
   second_wind: 'Second Chance',
   boost_reroll: 'Boost Reroll',
+  daily_gift: 'Daily Gift',
+  upgrade_trial: 'Upgrade Trial',
 };
 
 /** Full-screen mock ad: 3s countdown, then a close (or skip) control. */

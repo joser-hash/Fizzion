@@ -289,11 +289,13 @@ class Engine {
 
   // ---- commands (UI -> engine) ----------------------------------------
 
-  startRound(opts?: { colorRamp?: boolean }): void {
+  startRound(opts?: { colorRamp?: boolean; headStart?: boolean }): void {
     this.colorRampActive = opts?.colorRamp ?? false;
     resetRunMods();
     this.ownedBoosts = [];
-    this.boostOfferDelay = -1;
+    // Head Start consumable: open the run with a boost pick, delayed just
+    // long enough for the arena to read before the surge slams in.
+    this.boostOfferDelay = opts?.headStart ? 1.2 : -1;
     this.lastBoostOfferAt = -999;
     this.orb = createOrb(this.w / 2, this.h / 2);
     this.particles = [];
@@ -1024,7 +1026,11 @@ class Engine {
       CONFIG.relocateEveryMax +
         (CONFIG.relocateEveryMin - CONFIG.relocateEveryMax) * this.difficulty,
     );
-    let boostDue = this.deliveries === CONFIG.boostFirstAt;
+    // Min-gap guard also covers the first natural offer, so a Head Start
+    // pick at delivery 0 defers it rather than doubling up.
+    let boostDue =
+      this.deliveries === CONFIG.boostFirstAt &&
+      this.deliveries - this.lastBoostOfferAt >= CONFIG.boostMinGapDeliveries;
     if (
       this.runTime >= CONFIG.relocateMinTime &&
       this.deliveries >= CONFIG.relocateMinDeliveries &&

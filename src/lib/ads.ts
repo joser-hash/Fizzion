@@ -5,7 +5,9 @@ export type RewardedPlacement =
   | 'color_lock'
   | 'double_down'
   | 'second_wind'
-  | 'boost_reroll';
+  | 'boost_reroll'
+  | 'daily_gift'
+  | 'upgrade_trial';
 export type RewardedResult = 'completed' | 'skipped';
 
 /**

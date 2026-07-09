@@ -22,7 +22,9 @@ export function usePersistence(debounceMs = 400): void {
         s.adsRemoved === prev.adsRemoved &&
         s.ftueDone === prev.ftueDone &&
         s.requestsTaught === prev.requestsTaught &&
-        s.colorRampDone === prev.colorRampDone
+        s.colorRampDone === prev.colorRampDone &&
+        s.dailyGift === prev.dailyGift &&
+        s.headStartArmed === prev.headStartArmed
       ) {
         return;
       }
@@ -42,6 +44,8 @@ export function usePersistence(debounceMs = 400): void {
           ftueDone: cur.ftueDone,
           requestsTaught: cur.requestsTaught,
           colorRampDone: cur.colorRampDone,
+          dailyGift: cur.dailyGift,
+          headStartArmed: cur.headStartArmed,
         });
       }, debounceMs);
     });
